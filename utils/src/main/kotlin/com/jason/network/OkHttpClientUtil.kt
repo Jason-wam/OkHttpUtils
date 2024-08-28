@@ -1,6 +1,5 @@
 package com.jason.network
 
-import com.jason.network.converter.DataDecoder
 import okhttp3.*
 import okio.use
 import java.io.File
@@ -12,7 +11,6 @@ import java.nio.charset.Charset
 import java.util.concurrent.TimeUnit
 
 object OkHttpClientUtil {
-    private var decoder: DataDecoder? = null
     private val calls = HashMap<String, Call>()
     private val client by lazy {
         OkHttpClient.Builder().apply {
@@ -100,10 +98,6 @@ object OkHttpClientUtil {
         OkHttpCacheStore.init(cacheDir)
     }
 
-    fun setDecoder(decoder: DataDecoder) {
-        this.decoder = decoder
-    }
-
     fun newClient(config: (OkHttpClient.Builder.() -> Unit)? = null): OkHttpClient {
         val builder = client.newBuilder()
         if (config != null) {
@@ -112,166 +106,163 @@ object OkHttpClientUtil {
         return builder.build()
     }
 
-    /**
-     * 先读取缓存，如果缓存不存在，则执行请求，并将结果写入缓存
-     */
     @Throws(IOException::class)
-    fun readElseExecute(
-        request: Request, charset: String = "utf-8", cacheValidDuration: Long = OkHttpCacheStore.CACHE_FOREVER
-    ): String {
-        return (OkHttpCacheStore.get(request.cacheKey) ?: executeThenWrite(
-            request, charset, cacheValidDuration
-        )).let {
-            decoder?.convert(it) ?: it
+    fun execute(request: Request, charset: String): String {
+        return client.newCall(request).execute().use {
+            if (it.isRedirect) {
+                val location = it.header("Location") ?: throw IOException("No location found")
+                return execute(request.newBuilder().url(location).build(), charset)
+            }
+            if (it.isSuccessful) {
+                it.body?.source()?.readString(Charset.forName(charset)) ?: ""
+            } else {
+                throw IOException("Request failed with code ${it.code}")
+            }
         }
     }
 
-    /**
-     * 先执行请求，并将结果写入缓存
-     */
-    @Throws(IOException::class)
-    fun executeThenWrite(
-        request: Request, charset: String = "utf-8", cacheValidDuration: Long = OkHttpCacheStore.CACHE_FOREVER
-    ): String {
-        val call = client.newCall(request)
-        call.execute().use { response ->
-            if (call.isCanceled()) throw IOException("call is canceled")
+    private fun readCache(request: Request): String? {
+        return OkHttpCacheStore.get(request.cacheKey)
+    }
 
-            if (response.isRedirect) {
-                val location = response.header("Location")
-                if (location?.isNotBlank() == true) {
-                    return executeThenWrite(request.newBuilder().url(location).build(), charset).let {
-                        decoder?.convert(it) ?: it
-                    }
-                }
+    @Throws(IOException::class)
+    fun execute(config: BoxedRequest.() -> Unit): String {
+        return execute(BoxedRequest().apply(config))
+    }
+
+    @Throws(IOException::class)
+    fun execute(request: BoxedRequest): String {
+        return when (request.cacheMode) {
+            CacheMode.ONLY_CACHE -> {
+                readCache(request.request)?.let {
+                    if (request.decoder != null) request.decoder!!.convert(it) else it
+                } ?: throw IOException("No cache found!")
             }
 
-            if (response.isSuccessful) {
-                return response.body?.source().use { source ->
-                    source?.readString(Charset.forName(charset)) ?: ""
-                }.also {
-                    OkHttpCacheStore.put(request.cacheKey, it, cacheValidDuration)
+            CacheMode.ONLY_NETWORK -> {
+                execute(request.request, request.charset).also {
+                    OkHttpCacheStore.put(request.request.cacheKey, it, request.cacheValidDuration)
                 }.let {
-                    decoder?.convert(it) ?: it
+                    if (request.decoder != null) request.decoder!!.convert(it) else it
                 }
-            } else {
-                throw IOException("response is not successful: ${response.code}")
             }
-        }
-    }
 
-    /**
-     * 先执行请求，如果请求失败，则读取缓存
-     */
-    @Throws(IOException::class)
-    fun executeElseRead(
-        request: Request, charset: String = "utf-8", cacheValidDuration: Long = OkHttpCacheStore.CACHE_FOREVER
-    ): String {
-        return try {
-            executeThenWrite(request, charset, cacheValidDuration)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            OkHttpCacheStore.get(request.cacheKey, true)?.let {
-                return decoder?.convert(it) ?: it
-            } ?: throw IOException("${e.message} , and cache not found!")
-        }
-    }
+            CacheMode.NETWORK_ELSE_CACHE -> {
+                try {
+                    execute(request.request, request.charset).also {
+                        OkHttpCacheStore.put(request.request.cacheKey, it, request.cacheValidDuration)
+                    }.let {
+                        if (request.decoder != null) request.decoder!!.convert(it) else it
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    OkHttpCacheStore.get(request.request.cacheKey)?.let {
+                        if (request.decoder != null) request.decoder!!.convert(it) else it
+                    } ?: throw IOException("Request failed with code ${e.message} and no cache found!")
+                }
+            }
 
-    /**
-     * 先读取缓存，如果缓存不存在，则执行请求，并将结果写入缓存
-     * 异步模式
-     */
-    fun readElseEnqueue(
-        request: Request,
-        charset: String = "utf-8",
-        cacheValidDuration: Long = OkHttpCacheStore.CACHE_FOREVER,
-        block: (body: String, e: Exception?) -> Unit
-    ) {
-        val cacheBody = OkHttpCacheStore.get(request.cacheKey)?.let {
-            decoder?.convert(it) ?: it
-        }
-        if (cacheBody != null) {
-            block.invoke(cacheBody, null)
-        } else {
-            enqueueThenWrite(request, charset, cacheValidDuration, block)
-        }
-    }
-
-    /**
-     * 先执行请求，如果请求失败，则读取缓存
-     */
-    @Throws(IOException::class)
-    fun enqueueElseRead(
-        request: Request,
-        charset: String = "utf-8",
-        cacheValidDuration: Long = OkHttpCacheStore.CACHE_FOREVER,
-        block: (body: String, th: Throwable?) -> Unit
-    ) {
-        enqueueThenWrite(request, charset, cacheValidDuration) { s, e ->
-            if (e == null) {
-                block.invoke(s, null)
-            } else {
-                OkHttpCacheStore.get(request.cacheKey, true)?.let {
-                    decoder?.convert(it) ?: it
-                }?.let { cache ->
-                    block.invoke(cache, null)
-                } ?: let {
-                    block.invoke("", e)
+            CacheMode.CACHE_ELSE_NETWORK -> {
+                readCache(request.request)?.let {
+                    if (request.decoder != null) request.decoder!!.convert(it) else it
+                } ?: execute(request.request, request.charset).also {
+                    OkHttpCacheStore.put(request.request.cacheKey, it, request.cacheValidDuration)
+                }.let {
+                    if (request.decoder != null) request.decoder!!.convert(it) else it
                 }
             }
         }
     }
 
-    /**
-     * 先执行请求，并将结果写入缓存
-     * 异步模式
-     */
-    fun enqueueThenWrite(
-        request: Request,
-        charset: String = "utf-8",
-        cacheValidDuration: Long = OkHttpCacheStore.CACHE_FOREVER,
-        block: (body: String, e: Exception?) -> Unit
+
+    fun enqueue(
+        request: Request, charset: String, onError: ((e: Exception) -> Unit)? = null, onSucceed: (body: String) -> Unit
     ) {
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                if (!call.isCanceled()) {
-                    block.invoke("", e)
-                } else {
-                    OkhttpLogger.e("OkHttpClient", "enqueueThenWrite: ${call.request()} , call canceled!")
-                }
+                onError?.invoke(e)
             }
 
             override fun onResponse(call: Call, response: Response) {
-                if (call.isCanceled()) {
-                    OkhttpLogger.i("OkHttpClient", "enqueueThenWrite: ${call.request()} , call canceled!")
-                    return
-                }
                 if (response.isRedirect) {
                     val location = response.header("Location")
                     if (location?.isNotBlank() == true) {
-                        enqueueThenWrite(
-                            request.newBuilder().url(location).build(), charset, cacheValidDuration, block
-                        )
+                        enqueue(request.newBuilder().url(location).build(), charset, onError, onSucceed)
                     } else {
-                        block.invoke("", IOException("Redirect Location is empty!"))
+                        onError?.invoke(IOException("Response is redirect but location not found!"))
                     }
                 } else {
-                    if (!response.isSuccessful || response.body == null) {
-                        block.invoke(
-                            "", IOException("response is not successful: ${response.code} , and cache not found!")
-                        )
+                    if (response.isSuccessful) {
+                        onSucceed.invoke(response.body?.source()?.readString(Charset.forName(charset)) ?: "")
                     } else {
-                        response.body?.source().use { source ->
-                            source?.readString(Charset.forName(charset)) ?: ""
-                        }.also {
-                            OkHttpCacheStore.put(request.cacheKey, it, cacheValidDuration)
-                        }.let {
-                            block.invoke(decoder?.convert(it) ?: it, null)
-                        }
+                        onError?.invoke(IOException("Request failed with code ${response.code}"))
                     }
                 }
             }
         })
+    }
+
+    fun enqueue(
+        config: BoxedRequest.() -> Unit, onError: ((e: Exception) -> Unit)? = null, onSucceed: (body: String) -> Unit
+    ) {
+        val request = BoxedRequest().apply(config)
+        enqueue(request, onError, onSucceed)
+    }
+
+    fun enqueue(request: BoxedRequest, onError: ((e: Exception) -> Unit)? = null, onSucceed: (body: String) -> Unit) {
+        when (request.cacheMode) {
+            CacheMode.ONLY_CACHE -> {
+                readCache(request.request)?.let {
+                    if (request.decoder != null) request.decoder!!.convert(it) else it
+                }?.let {
+                    onSucceed(it)
+                } ?: let {
+                    onError?.invoke(IOException("No cache found!"))
+                }
+            }
+
+            CacheMode.ONLY_NETWORK -> {
+                enqueue(request.request, request.charset, onError = {
+                    onError?.invoke(it)
+                }, onSucceed = {
+                    OkHttpCacheStore.put(request.request.cacheKey, it, request.cacheValidDuration)
+                    onSucceed(it.let {
+                        if (request.decoder != null) request.decoder!!.convert(it) else it
+                    })
+                })
+            }
+
+            CacheMode.NETWORK_ELSE_CACHE -> {
+                enqueue(request.request, request.charset, onError = { e ->
+                    readCache(request.request)?.let {
+                        onSucceed(it)
+                    } ?: let {
+                        onError?.invoke(IOException(buildString {
+                            append(e.message)
+                            append(" and no cache found!")
+                        }))
+                    }
+                }, onSucceed = {
+                    OkHttpCacheStore.put(request.request.cacheKey, it, request.cacheValidDuration)
+                    onSucceed(it.let {
+                        if (request.decoder != null) request.decoder!!.convert(it) else it
+                    })
+                })
+            }
+
+            CacheMode.CACHE_ELSE_NETWORK -> {
+                readCache(request.request)?.let {
+                    if (request.decoder != null) request.decoder!!.convert(it) else it
+                }?.let {
+                    onSucceed(it)
+                } ?: enqueue(request.request, request.charset, onError = onError, onSucceed = {
+                    OkHttpCacheStore.put(request.request.cacheKey, it, request.cacheValidDuration)
+                    onSucceed(it.let {
+                        if (request.decoder != null) request.decoder!!.convert(it) else it
+                    })
+                })
+            }
+        }
     }
 
     @Throws(IOException::class)

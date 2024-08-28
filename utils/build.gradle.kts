@@ -25,7 +25,7 @@ kotlin {
 }
 
 
-val libVersion = "1.0.1"
+val libVersion = "1.0.7"
 
 tasks.withType<Jar> {
     archiveBaseName.set("selector") // 设置构件的基本名称

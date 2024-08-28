@@ -3,14 +3,13 @@ package com.jason.network
 import com.jakewharton.disklrucache.DiskLruCache
 import java.io.File
 
-
 object OkHttpCacheStore {
     private var cache: DiskLruCache? = null
 
     const val CACHE_NEVER = 0L
     const val CACHE_FOREVER = -1L
 
-    fun init(dir: File) {
+    internal fun init(dir: File) {
         try {
             cache = DiskLruCache.open(dir, 1, 3, 1024 * 1024 * 1024 * 1)
         } catch (e: Exception) {
@@ -25,6 +24,7 @@ object OkHttpCacheStore {
         if (validDuration > CACHE_NEVER || validDuration == CACHE_FOREVER) {
             cache ?: return
             try {
+                cache?.remove(key) //覆盖数据
                 val editor = cache!!.edit(key)
                 editor[0] = body
                 editor[1] = validDuration.toString()
@@ -74,6 +74,14 @@ object OkHttpCacheStore {
     fun close() {
         try {
             cache?.close()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun clear() {
+        try {
+            cache?.delete()
         } catch (e: Exception) {
             e.printStackTrace()
         }
