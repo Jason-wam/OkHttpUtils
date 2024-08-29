@@ -3,13 +3,13 @@ package com.jason.network
 import java.io.FileInputStream
 import java.io.InputStream
 import java.io.OutputStream
-import kotlin.math.roundToInt
+import java.io.RandomAccessFile
 
 
-fun InputStream.copyWithProgress(
-    outStream: OutputStream, progress: (progress: Int, copied: Long, total: Long) -> Unit
+fun InputStream.copyTo(
+    outStream: OutputStream, progress: (percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit
 ) {
-    copyWithProgress(contentLength = -1,outStream, progress)
+    copyTo(contentLength = -1, outStream, progress)
 }
 
 /**
@@ -22,8 +22,10 @@ fun InputStream.copyWithProgress(
  * @param progress 一个接收进度更新的回调函数，进度以0到100的整数表示。
  * @return 返回已复制的字节数。
  */
-fun InputStream.copyWithProgress(
-    contentLength: Long = -1, outStream: OutputStream, progress: (progress: Int, copied: Long, total: Long) -> Unit
+fun InputStream.copyTo(
+    contentLength: Long = -1,
+    outStream: OutputStream,
+    progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)?=null
 ): Long {
     var bytesCopied: Long = 0
     val totalBytes = if (this is FileInputStream) {
@@ -32,18 +34,37 @@ fun InputStream.copyWithProgress(
         if (contentLength > 0) contentLength else available().toLong()
     }
 
-    println("size: $totalBytes")
     val buffer = ByteArray(4096)
     var bytes = read(buffer)
-    var progressPercent = 0
     while (bytes >= 0) {
         outStream.write(buffer, 0, bytes)
         bytesCopied += bytes
-        val newProgressPercent = (bytesCopied / totalBytes.toFloat() * 100).roundToInt()
-        if (progressPercent != newProgressPercent) {
-            progressPercent = newProgressPercent
-            progress((bytesCopied / totalBytes.toFloat() * 100).roundToInt(), bytesCopied, totalBytes)
-        }
+        val percent = if (totalBytes > 0) bytesCopied / totalBytes.toFloat() * 100 else 0f
+        progress?.invoke(percent, bytesCopied, totalBytes)
+        bytes = read(buffer)
+    }
+    return bytesCopied
+}
+
+fun InputStream.copyTo(
+    contentLength: Long = -1,
+    file: RandomAccessFile,
+    progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)?=null
+): Long {
+    var bytesCopied: Long = 0
+    val totalBytes = if (this is FileInputStream) {
+        channel.size()
+    } else {
+        if (contentLength > 0) contentLength else available().toLong()
+    }
+
+    val buffer = ByteArray(4096)
+    var bytes = read(buffer)
+    while (bytes >= 0) {
+        file.write(buffer, 0, bytes)
+        bytesCopied += bytes
+        val percent = if (totalBytes > 0) bytesCopied / totalBytes.toFloat() * 100 else 0f
+        progress?.invoke(percent, bytesCopied, totalBytes)
         bytes = read(buffer)
     }
     return bytesCopied

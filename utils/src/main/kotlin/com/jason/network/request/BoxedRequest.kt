@@ -1,6 +1,7 @@
-package com.jason.network
+package com.jason.network.request
 
-import com.jason.network.converter.DataDecoder
+import com.jason.network.CacheMode
+import com.jason.network.DataDecoder
 import okhttp3.Headers
 import okhttp3.Request
 import okhttp3.RequestBody
@@ -10,8 +11,15 @@ class BoxedRequest {
     internal var charset: String = "utf-8"
     internal var cacheValidDuration: Long = CacheDuration.FOREVER
     internal var cacheMode: CacheMode = CacheMode.ONLY_NETWORK
-    private var requestBuilder: Request.Builder = Request.Builder()
+    internal var onError: ((e: Exception) -> Unit)? = null
+    internal var onSucceed: ((body: String) -> Unit)? = null
+    private var builder: Request.Builder = Request.Builder()
 
+    /**
+     * 缓存时长
+     * NEVER 禁用缓存，无论什么缓存模式都不会写入缓存
+     * FOREVER 永久缓存，不会失效
+     */
     object CacheDuration {
         const val NEVER = 0L
         const val FOREVER = -1L
@@ -25,7 +33,7 @@ class BoxedRequest {
 
     val request: Request
         get() {
-            return requestBuilder.build()
+            return builder.build()
         }
 
     val url: String
@@ -34,63 +42,63 @@ class BoxedRequest {
         }
 
     fun url(url: String): BoxedRequest {
-        requestBuilder.url(url)
+        builder.url(url)
         return this
     }
 
     fun headers(headers: Headers): BoxedRequest {
-        requestBuilder.headers(headers)
+        builder.headers(headers)
         return this
     }
 
     fun header(name: String, value: String): BoxedRequest {
-        requestBuilder.header(name, value)
+        builder.header(name, value)
         return this
     }
 
     fun addHeader(name: String, value: String): BoxedRequest {
-        requestBuilder.addHeader(name, value)
+        builder.addHeader(name, value)
         return this
     }
 
     fun tag(tag: Any): BoxedRequest {
-        requestBuilder.tag(tag)
+        builder.tag(tag)
         return this
     }
 
     fun post(body: RequestBody): BoxedRequest {
-        requestBuilder.post(body)
+        builder.post(body)
         return this
     }
 
     fun put(body: RequestBody): BoxedRequest {
-        requestBuilder.put(body)
+        builder.put(body)
         return this
     }
 
     fun delete(body: RequestBody?): BoxedRequest {
-        requestBuilder.delete(body)
+        builder.delete(body)
         return this
     }
 
     fun patch(body: RequestBody): BoxedRequest {
-        requestBuilder.patch(body)
+        builder.patch(body)
         return this
     }
 
     fun get(): BoxedRequest {
-        requestBuilder.get()
+        builder.get()
         return this
     }
 
     fun head(): BoxedRequest {
-        requestBuilder.head()
+        builder.head()
         return this
     }
 
 
     fun setBaseRequest(config: Request.Builder.() -> Unit): BoxedRequest {
-        requestBuilder.apply(config)
+        builder.apply(config)
         return this
     }
 
@@ -104,6 +112,10 @@ class BoxedRequest {
         return this
     }
 
+    /**
+     * 设置缓存时长
+     * @param duration 单位：毫秒
+     */
     fun setCacheValidDuration(duration: Long): BoxedRequest {
         this.cacheValidDuration = duration
         return this
@@ -111,6 +123,19 @@ class BoxedRequest {
 
     fun setCacheMode(cacheMode: CacheMode): BoxedRequest {
         this.cacheMode = cacheMode
+        return this
+    }
+
+    /**
+     *  同步请求下载时不会执行，直接抛出异常
+     */
+    fun onError(onError: ((e: Exception) -> Unit)): BoxedRequest {
+        this.onError = onError
+        return this
+    }
+
+    fun onSucceed(onSucceed: ((body: String) -> Unit)): BoxedRequest {
+        this.onSucceed = onSucceed
         return this
     }
 }

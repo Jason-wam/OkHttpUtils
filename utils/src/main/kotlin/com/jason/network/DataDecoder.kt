@@ -1,4 +1,4 @@
-package com.jason.network.converter
+package com.jason.network
 
 interface DataDecoder {
     fun convert(response: String): String
