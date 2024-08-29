@@ -59,38 +59,8 @@ object OkHttpClientUtil {
         return builder.build()
     }
 
-    private fun getCache(request: Request): String? {
-        return OkHttpCacheStore.get(request.cacheKey)
-    }
-
-    /**
-     * 执行网络请求并返回响应结果
-     *
-     * @param request 请求对象，包含了请求的URL、参数、方法等信息
-     * @param charset 字符集编码，用于解析响应体
-     * @return 响应体的内容，以字符串形式返回
-     * @throws IOException 如果请求失败、重定向出现问题或响应体解析失败时抛出此异常
-     */
-    @Throws(IOException::class)
-    fun execute(request: Request, charset: String): String {
-        // 发送请求并获取响应对象
-        client.newCall(request).execute().use { response ->
-            // 如果响应指示需要重定向
-            if (response.isRedirect) {
-                // 获取重定向的位置信息，如果不存在则抛出异常
-                val location = response.header("Location") ?: throw IOException("No location found")
-                // 使用新的URL重新构建请求并执行
-                return execute(request.newBuilder().url(location).build(), charset)
-            }
-            // 如果请求成功
-            if (response.isSuccessful) {
-                // 返回响应体的内容，使用指定的字符集进行解析
-                return response.body?.source()?.readString(Charset.forName(charset)) ?: ""
-            } else {
-                // 如果请求失败，根据响应码抛出异常
-                throw IOException("Request failed with code ${response.code}")
-            }
-        }
+    private fun Request.getCache(): String? {
+        return OkHttpCacheStore.get(cacheKey)
     }
 
     /**
@@ -118,7 +88,7 @@ object OkHttpClientUtil {
     fun execute(request: BoxedRequest): String {
         return when (request.cacheMode) {
             CacheMode.ONLY_CACHE -> {
-                getCache(request.request)?.let {
+                request.request.getCache()?.let {
                     if (request.decoder != null) request.decoder!!.convert(it) else it
                 }?.also {
                     request.onSucceed?.invoke(it)
@@ -155,7 +125,7 @@ object OkHttpClientUtil {
             }
 
             CacheMode.CACHE_ELSE_NETWORK -> {
-                getCache(request.request)?.let {
+                request.request.getCache()?.let {
                     if (request.decoder != null) request.decoder!!.convert(it) else it
                 }?.also {
                     request.onSucceed?.invoke(it)
@@ -170,6 +140,37 @@ object OkHttpClientUtil {
         }
     }
 
+
+    /**
+     * 执行网络请求并返回响应结果
+     *
+     * @param request 请求对象，包含了请求的URL、参数、方法等信息
+     * @param charset 字符集编码，用于解析响应体
+     * @return 响应体的内容，以字符串形式返回
+     * @throws IOException 如果请求失败、重定向出现问题或响应体解析失败时抛出此异常
+     */
+    @Throws(IOException::class)
+    private fun execute(request: Request, charset: String): String {
+        // 发送请求并获取响应对象
+        client.newCall(request).execute().use { response ->
+            // 如果响应指示需要重定向
+            if (response.isRedirect) {
+                // 获取重定向的位置信息，如果不存在则抛出异常
+                val location = response.header("Location") ?: throw IOException("No location found")
+                // 使用新的URL重新构建请求并执行
+                return execute(request.newBuilder().url(location).build(), charset)
+            }
+            // 如果请求成功
+            if (response.isSuccessful) {
+                // 返回响应体的内容，使用指定的字符集进行解析
+                return response.body?.source()?.readString(Charset.forName(charset)) ?: ""
+            } else {
+                // 如果请求失败，根据响应码抛出异常
+                throw IOException("Request failed with code ${response.code}")
+            }
+        }
+    }
+
     /**
      * 将打包的请求加入队列
      *
@@ -179,9 +180,26 @@ object OkHttpClientUtil {
      * @param request BoxedRequest对象，包含了所有执行请求所需的信息
      */
     fun enqueue(request: BoxedRequest) {
-        // 调用enqueue方法，传入BoxedRequest对象的相应属性
-        // 这里不直接处理请求，而是将请求的细节封装并传递
-        enqueue(request.request, request.charset, request.onError, request.onSucceed)
+        enqueue(request, request.onError, request.onSucceed)
+    }
+
+    /**
+     * 将一个配置化的请求加入队列
+     *
+     * @param config BoxedRequest的Lambda表达式，用于在调用点内配置请求
+     *
+     * 此函数的作用是提供一种链式调用的方式，使得请求的配置更加清晰和简洁
+     * 它首先创建一个BoxedRequest实例，然后应用传入的配置Lambda来配置这个请求
+     * 最后，它将这个配置好的请求以及其成功和失败的回调加入到处理队列中
+     *
+     * 为什么这么做：
+     * 这种设计允许调用者以更加直观和便捷的方式配置和添加请求，避免了繁琐的构造器或者多个参数的方法调用
+     *
+     */
+    fun enqueue(config: BoxedRequest.() -> Unit) {
+        BoxedRequest().apply(config).let {
+            enqueue(it, it.onError, it.onSucceed)
+        }
     }
 
     /**
@@ -192,7 +210,7 @@ object OkHttpClientUtil {
      * @param onError 错误回调，当请求发生异常时被调用默认为空
      * @param onSucceed 成功回调，当请求成功完成时被调用，传入解析后的响应体
      */
-    fun enqueue(
+    private fun enqueue(
         request: Request,
         charset: String,
         onError: ((e: Exception) -> Unit)? = null,
@@ -227,45 +245,6 @@ object OkHttpClientUtil {
     }
 
     /**
-     * 将一个配置化的请求加入队列
-     *
-     * @param config BoxedRequest的Lambda表达式，用于在调用点内配置请求
-     *
-     * 此函数的作用是提供一种链式调用的方式，使得请求的配置更加清晰和简洁
-     * 它首先创建一个BoxedRequest实例，然后应用传入的配置Lambda来配置这个请求
-     * 最后，它将这个配置好的请求以及其成功和失败的回调加入到处理队列中
-     *
-     * 为什么这么做：
-     * 这种设计允许调用者以更加直观和便捷的方式配置和添加请求，避免了繁琐的构造器或者多个参数的方法调用
-     *
-     * 重要性：
-     * 这个函数是请求处理流程的入口，所有需要发送的请求都通过这个函数进行配置和排队
-     */
-    fun enqueue(config: BoxedRequest.() -> Unit) {
-        BoxedRequest().apply(config).let {
-            enqueue(it, it.onError, it.onSucceed)
-        }
-    }
-
-    /**
-     * 将一个任务加入队列并执行
-     *
-     * 该函数用于接收一个任务配置（通过 BoxedRequest.() -> Unit 闭包定义），执行该任务，并处理其成功或失败的结果
-     * 它是enqueue函数家族的一部分，专门用于处理异步任务的队列执行和结果处理
-     *
-     * @param config 一个 Lambda 表达式，用于配置要执行的任务请求参数它定义了任务的具体执行逻辑
-     * @param onError 一个可选的 Lambda 表达式，当任务执行发生异常时被调用用于处理错误情况如果不设置，默认为 null，即不处理错误
-     * @param onSucceed 一个 Lambda 表达式，当任务成功完成时被调用接收一个 String 类型的响应体参数，代表任务的成功结果
-     */
-    fun enqueue(
-        config: BoxedRequest.() -> Unit,
-        onError: ((e: Exception) -> Unit)? = null,
-        onSucceed: ((body: String) -> Unit)? = null
-    ) {
-        enqueue(BoxedRequest().apply(config), onError, onSucceed)
-    }
-
-    /**
      * 将请求加入队列并处理结果
      *
      * 该函数的主要作用是将一个封装好的请求对象加入处理队列，并在请求处理完毕后
@@ -276,12 +255,12 @@ object OkHttpClientUtil {
      * @param onError 错误回调函数，当请求处理发生异常时被调用。默认为null，表示不处理错误
      * @param onSucceed 成功回调函数，当请求处理成功时被调用，携带处理结果的字符串表示
      */
-    fun enqueue(
+    private fun enqueue(
         request: BoxedRequest, onError: ((e: Exception) -> Unit)? = null, onSucceed: ((body: String) -> Unit)? = null
     ) {
         when (request.cacheMode) {
             CacheMode.ONLY_CACHE -> {
-                getCache(request.request)?.let {
+                request.request.getCache()?.let {
                     if (request.decoder != null) request.decoder!!.convert(it) else it
                 }?.let {
                     onSucceed?.invoke(it)
@@ -303,7 +282,7 @@ object OkHttpClientUtil {
 
             CacheMode.NETWORK_ELSE_CACHE -> {
                 enqueue(request.request, request.charset, onError = { e ->
-                    getCache(request.request)?.let {
+                    request.request.getCache()?.let {
                         onSucceed?.invoke(it)
                     } ?: let {
                         onError?.invoke(IOException(buildString {
@@ -320,7 +299,7 @@ object OkHttpClientUtil {
             }
 
             CacheMode.CACHE_ELSE_NETWORK -> {
-                getCache(request.request)?.let {
+                request.request.getCache()?.let {
                     if (request.decoder != null) request.decoder!!.convert(it) else it
                 }?.let {
                     onSucceed?.invoke(it)
@@ -374,26 +353,7 @@ object OkHttpClientUtil {
     }
 
     @Throws(Exception::class)
-    fun download(
-        url: String,
-        directory: File,
-        filename: String? = null,
-        overwrite: Boolean = false,
-        rangeDownload: Boolean,
-        md5: String = "",
-        sha1: String = "",
-        sha256: String = "",
-        onVerifyFile: ((percent: Float, totalCopied: Long, totalSize: Long) -> Unit)? = null,
-        onProgress: ((percent: Float, downloadBytes: Long, totalBytes: Long) -> Unit)? = null
-    ): File {
-        val request = Request.Builder().url(url).get().build()
-        return download(
-            request, directory, filename, overwrite, rangeDownload, md5, sha1, sha256, onVerifyFile, onProgress
-        )
-    }
-
-    @Throws(Exception::class)
-    fun download(
+    private fun download(
         request: Request,
         directory: File,
         filename: String? = null,
@@ -561,6 +521,27 @@ object OkHttpClientUtil {
         }
     }
 
+    fun downloadAsync(request: DownloadRequest) {
+        if (request.saveDirectory == null) {
+            request.onError?.invoke(IOException("SaveDirectory is null!"))
+        } else {
+            downloadAsync(
+                request.request,
+                request.saveDirectory!!,
+                request.filename,
+                request.overwrite,
+                request.rangeDownload,
+                request.md5,
+                request.sha1,
+                request.sha256,
+                request.onVerifyFile,
+                request.onError,
+                request.onProgress,
+                request.onSucceed
+            )
+        }
+    }
+
     fun downloadAsync(config: DownloadRequest.() -> Unit) {
         val request = DownloadRequest().apply(config)
         if (request.saveDirectory == null) {
@@ -583,7 +564,7 @@ object OkHttpClientUtil {
         }
     }
 
-    fun downloadAsync(
+    private fun downloadAsync(
         request: Request,
         directory: File,
         filename: String? = null,
