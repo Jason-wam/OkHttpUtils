@@ -4,6 +4,8 @@ import java.io.FileInputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.io.RandomAccessFile
+import java.math.BigInteger
+import java.security.MessageDigest
 
 
 fun InputStream.copyTo(
@@ -25,7 +27,7 @@ fun InputStream.copyTo(
 fun InputStream.copyTo(
     contentLength: Long = -1,
     outStream: OutputStream,
-    progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)?=null
+    progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
 ): Long {
     var bytesCopied: Long = 0
     val totalBytes = if (this is FileInputStream) {
@@ -49,7 +51,7 @@ fun InputStream.copyTo(
 fun InputStream.copyTo(
     contentLength: Long = -1,
     file: RandomAccessFile,
-    progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)?=null
+    progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
 ): Long {
     var bytesCopied: Long = 0
     val totalBytes = if (this is FileInputStream) {
@@ -68,4 +70,86 @@ fun InputStream.copyTo(
         bytes = read(buffer)
     }
     return bytesCopied
+}
+
+fun InputStream.sumMd5(
+    contentLength: Long = -1, progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
+): String {
+    return sum(MessageDigest.getInstance("MD5"), contentLength, progress)
+}
+
+fun InputStream.sumSha1(
+    contentLength: Long = -1, progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
+): String {
+    return sum(MessageDigest.getInstance("SHA-1"), contentLength, progress)
+}
+
+fun InputStream.sumSha256(
+    contentLength: Long = -1, progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
+): String {
+    return sum(MessageDigest.getInstance("SHA-256"), contentLength, progress)
+}
+
+fun InputStream.sum(
+    digest: MessageDigest,
+    contentLength: Long = -1,
+    progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
+): String {
+    val buffer = ByteArray(4096)
+    var bytesRead: Int
+    var totalBytesCopied: Long = 0
+    val totalBytes = if (this is FileInputStream) {
+        channel.size()
+    } else {
+        if (contentLength > 0) contentLength else available().toLong()
+    }
+
+    while (read(buffer).also { bytesRead = it } != -1) {
+        digest.update(buffer)
+        totalBytesCopied += bytesRead
+
+        // 计算进度并调用回调
+        progress?.invoke(
+            totalBytesCopied.toFloat() / totalBytes * 100, totalBytesCopied, totalBytes
+        )
+    }
+
+    // 计算 MD5 值并转换为十六进制字符串
+    val checksum = BigInteger(1, digest.digest()).toString(16)
+    return checksum.padStart(32, '0')
+}
+
+fun FileInputStream.sum(
+    digest: MessageDigest, progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
+): String {
+    val buffer = ByteArray(4096)
+    var bytesRead: Int
+    var totalBytesCopied: Long = 0
+    val totalBytes = channel.size() // 获取文件总字节数
+
+    while (read(buffer).also { bytesRead = it } != -1) {
+        digest.update(buffer)
+        totalBytesCopied += bytesRead
+
+        // 计算进度并调用回调
+        progress?.invoke(
+            totalBytesCopied.toFloat() / totalBytes * 100, totalBytesCopied, totalBytes
+        )
+    }
+
+    // 计算 MD5 值并转换为十六进制字符串
+    val checksum = BigInteger(1, digest.digest()).toString(16)
+    return checksum.padStart(32, '0')
+}
+
+fun FileInputStream.sumMd5(progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null): String {
+    return sum(MessageDigest.getInstance("MD5"), progress)
+}
+
+fun FileInputStream.sumSha1(progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null): String {
+    return sum(MessageDigest.getInstance("SHA-1"), progress)
+}
+
+fun FileInputStream.sumSha256(progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null): String {
+    return sum(MessageDigest.getInstance("SHA-256"), progress)
 }

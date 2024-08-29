@@ -13,19 +13,27 @@ fun main() {
 }
 
 fun download() {
+    //异步请求
     OkHttpClientUtil.downloadAsync {
         //shasum -a 256 = 8762f7e74e4d64d72fceb5f70682e6b069932deedb4949c6975d0f0fe0a91be3
         url("https://releases.ubuntu.com/24.04/ubuntu-24.04-live-server-amd64.iso")
         setSaveDirectory(File("D:/"))
         setFileName("ubuntu-24.04-live-server-amd64.iso")
         enableRangeDownload(true)
+        setSHA256("8762f7e74e4d64d72fceb5f70682e6b069932deedb4949c6975d0f0fe0a91be3")
 
-        //由于是同步请求，所以不会执行此处代码，而是直接抛出异常
+        onVerifyFile { percent, totalCopied, totalSize ->
+            print("\r校验文件： $percent , $totalCopied/$totalSize")
+        }
+
+        //同步请求不会执行此处代码，而是直接抛出异常
         onError {
+            println()
             println("下载失败： ${it.message}")
         }
 
         onSucceed {
+            println()
             println("下载成功： $it")
         }
 

@@ -344,6 +344,10 @@ object OkHttpClientUtil {
             request.filename,
             request.overwrite,
             request.rangeDownload,
+            request.md5,
+            request.sha1,
+            request.sha256,
+            request.onVerifyFile,
             request.onProgress
         ).also {
             request.onSucceed?.invoke(it)
@@ -359,8 +363,14 @@ object OkHttpClientUtil {
             request.filename,
             request.overwrite,
             request.rangeDownload,
+            request.md5,
+            request.sha1,
+            request.sha256,
+            request.onVerifyFile,
             request.onProgress
-        )
+        ).also {
+            request.onSucceed?.invoke(it)
+        }
     }
 
     @Throws(IOException::class)
@@ -370,10 +380,16 @@ object OkHttpClientUtil {
         filename: String? = null,
         overwrite: Boolean = false,
         rangeDownload: Boolean,
+        md5: String = "",
+        sha1: String = "",
+        sha256: String = "",
+        onVerifyFile: ((percent: Float, totalCopied: Long, totalSize: Long) -> Unit)? = null,
         onProgress: ((percent: Float, downloadBytes: Long, totalBytes: Long) -> Unit)? = null
     ): File {
         val request = Request.Builder().url(url).get().build()
-        return download(request, directory, filename, overwrite, rangeDownload, onProgress)
+        return download(
+            request, directory, filename, overwrite, rangeDownload, md5, sha1, sha256, onVerifyFile, onProgress
+        )
     }
 
     @Throws(IOException::class)
@@ -383,6 +399,10 @@ object OkHttpClientUtil {
         filename: String? = null,
         overwrite: Boolean = false,
         rangeDownload: Boolean,
+        md5: String = "",
+        sha1: String = "",
+        sha256: String = "",
+        onVerifyFile: ((percent: Float, totalCopied: Long, totalSize: Long) -> Unit)? = null,
         onProgress: ((percent: Float, downloadBytes: Long, totalBytes: Long) -> Unit)? = null
     ): File {
         var newRequest = request
@@ -400,6 +420,26 @@ object OkHttpClientUtil {
             }
         }
 
+        fun verifyFile(file: File) {
+            if (md5.isNotEmpty()) {
+                if(!file.verifyMD5(md5, onVerifyFile)){
+                    throw IOException("File MD5 verification failed!")
+                }
+            }
+
+            if (sha1.isNotEmpty()) {
+                if(!file.verifySHA1(sha1, onVerifyFile)){
+                    throw IOException("File SHA-1 verification failed!")
+                }
+            }
+
+            if (sha256.isNotEmpty()) {
+                if(file.verifyShA256(sha256, onVerifyFile)){
+                    throw IOException("File SHA-256 verification failed!")
+                }
+            }
+        }
+
         //下载文件使用单独的Client
         downloadClient.newCall(newRequest).execute().use { response ->
             if (response.isRedirect) {
@@ -414,6 +454,10 @@ object OkHttpClientUtil {
                         filename,
                         overwrite,
                         rangeDownload,
+                        md5,
+                        sha1,
+                        sha256,
+                        onVerifyFile,
                         onProgress
                     )
                 }
@@ -427,6 +471,7 @@ object OkHttpClientUtil {
                     when (response.code) {
                         416 -> { //416一般为请求的文件大小范围超出服务器文件大小范围
                             if (file.exists() && file.length() > 0L) {
+                                verifyFile(file)
                                 configFile.delete()
                                 return file
                             } else {
@@ -472,6 +517,7 @@ object OkHttpClientUtil {
                                 }
                             }
 
+                            verifyFile(file)
                             configFile.delete()
                             return file
                         }
@@ -483,6 +529,8 @@ object OkHttpClientUtil {
                             }
 
                             if (file.exists() && file.length() == contentLength) {
+                                verifyFile(file)
+                                configFile.delete()
                                 return file
                             } else {
                                 configFile.outputStream().writer().use {
@@ -497,6 +545,8 @@ object OkHttpClientUtil {
                                             input.copyTo(contentLength, out, onProgress)
                                         }
                                     }
+
+                                    verifyFile(file)
                                     configFile.delete()
                                     return file
                                 } ?: let {
@@ -522,6 +572,10 @@ object OkHttpClientUtil {
                 request.filename,
                 request.overwrite,
                 request.rangeDownload,
+                request.md5,
+                request.sha1,
+                request.sha256,
+                request.onVerifyFile,
                 request.onError,
                 request.onProgress,
                 request.onSucceed
@@ -530,25 +584,15 @@ object OkHttpClientUtil {
     }
 
     fun downloadAsync(
-        url: String,
-        directory: File,
-        filename: String? = null,
-        overwrite: Boolean = false,
-        rangeDownload: Boolean = false,
-        onError: ((e: Exception) -> Unit)? = null,
-        onProgress: ((percent: Float, downloadBytes: Long, totalBytes: Long) -> Unit)? = null,
-        onSucceed: ((file: File) -> Unit)? = null
-    ) {
-        val request = Request.Builder().url(url).get().build()
-        downloadAsync(request, directory, filename, overwrite, rangeDownload, onError, onProgress, onSucceed)
-    }
-
-    fun downloadAsync(
         request: Request,
         directory: File,
         filename: String? = null,
         overwrite: Boolean = false,
         rangeDownload: Boolean = false,
+        md5: String = "",
+        sha1: String = "",
+        sha256: String = "",
+        onVerifyFile: ((percent: Float, totalCopied: Long, totalSize: Long) -> Unit)? = null,
         onError: ((e: Exception) -> Unit)? = null,
         onProgress: ((percent: Float, downloadBytes: Long, totalBytes: Long) -> Unit)? = null,
         onSucceed: ((file: File) -> Unit)? = null
@@ -563,6 +607,42 @@ object OkHttpClientUtil {
             }
             if (file.exists()) {
                 newRequest = request.newBuilder().header("Range", "bytes=${file.length()}-").build()
+            }
+        }
+
+        fun verifyFile(file: File) {
+            try {
+                if (md5.isNotEmpty()) {
+                    if (file.verifyMD5(md5, onVerifyFile)) {
+                        onSucceed?.invoke(file)
+                    } else {
+                        onError?.invoke(IOException("File MD5 verification failed!"))
+                    }
+                    return
+                }
+
+                if (sha1.isNotEmpty()) {
+                    if (file.verifySHA1(sha1, onVerifyFile)) {
+                        onSucceed?.invoke(file)
+                    } else {
+                        onError?.invoke(IOException("File SHA-1 verification failed!"))
+                    }
+                    return
+                }
+
+                if (sha256.isNotEmpty()) {
+                    if (file.verifyShA256(sha256, onVerifyFile)) {
+                        onSucceed?.invoke(file)
+                    } else {
+                        onError?.invoke(IOException("File SHA-256 verification failed!"))
+                    }
+                    return
+                }
+
+                onSucceed?.invoke(file)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                onError?.invoke(e)
             }
         }
 
@@ -585,6 +665,10 @@ object OkHttpClientUtil {
                                 filename,
                                 overwrite,
                                 rangeDownload,
+                                md5,
+                                sha1,
+                                sha256,
+                                onVerifyFile,
                                 onError,
                                 onProgress,
                                 onSucceed
@@ -601,8 +685,8 @@ object OkHttpClientUtil {
                                 when (response.code) {
                                     416 -> {//416一般为请求的文件大小范围超出服务器文件大小范围
                                         if (file.exists() && file.length() > 0L) {
+                                            verifyFile(file)
                                             configFile.delete()
-                                            onSucceed?.invoke(file)
                                         } else {
                                             onError?.invoke(IOException("Request content range error, code : ${response.code}"))
                                         }
@@ -648,7 +732,8 @@ object OkHttpClientUtil {
                                                     }
                                                 }
                                                 configFile.delete()
-                                                onSucceed?.invoke(file)
+
+                                                verifyFile(file)
                                             } ?: let {
                                                 onError?.invoke(IOException("Response body is null!"))
                                             }
@@ -661,7 +746,7 @@ object OkHttpClientUtil {
                                             configFile.delete()
                                         }
                                         if (file.exists() && file.length() == contentLength) {
-                                            onSucceed?.invoke(file)
+                                            verifyFile(file)
                                         } else {
                                             configFile.outputStream().writer().use {
                                                 it.write("ContentLength=$contentLength")
@@ -676,7 +761,8 @@ object OkHttpClientUtil {
                                                     }
                                                 }
                                                 configFile.delete()
-                                                onSucceed?.invoke(file)
+
+                                                verifyFile(file)
                                             } ?: let {
                                                 onError?.invoke(IOException("Response body is null!"))
                                             }

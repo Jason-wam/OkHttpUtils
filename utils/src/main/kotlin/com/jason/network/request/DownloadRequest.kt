@@ -13,6 +13,10 @@ class DownloadRequest {
     internal var onSucceed: ((file: File) -> Unit)? = null
     internal var onProgress: ((percent: Float, downloadBytes: Long, totalBytes: Long) -> Unit)? = null
     internal var rangeDownload: Boolean = false
+    internal var md5: String = ""
+    internal var sha1: String = ""
+    internal var sha256: String = ""
+    internal var onVerifyFile: ((percent: Float, downloadBytes: Long, totalBytes: Long) -> Unit)? = null
 
     val request: Request
         get() {
@@ -93,6 +97,46 @@ class DownloadRequest {
 
     fun onProgress(onProgress: ((percent: Float, totalCopied: Long, totalSize: Long) -> Unit)): DownloadRequest {
         this.onProgress = onProgress
+        return this
+    }
+
+    /**
+     * 设置校验文件 MD5 值
+     *
+     * MD5、SHA-1、SHA-256 三种校验方式依次执行，校验顺序为 MD5 -> SHA-1 -> SHA-256
+     */
+    fun setMD5(md5: String): DownloadRequest {
+        this.md5 = md5
+        return this
+    }
+
+    /**
+     * 设置校验文件 SHA-1 值
+     *
+     * MD5、SHA-1、SHA-256 三种校验方式依次执行，校验顺序为 MD5 -> SHA-1 -> SHA-256
+     */
+    fun setSHA1(sha1: String): DownloadRequest {
+        this.sha1 = sha1
+        return this
+    }
+
+    /**
+     * 设置校验文件 SHA-256 值
+     *
+     * MD5、SHA-1、SHA-256 三种校验方式依次执行，校验顺序为 MD5 -> SHA-1 -> SHA-256
+     */
+    fun setSHA256(sha256: String): DownloadRequest {
+        this.sha256 = sha256
+        return this
+    }
+
+    /**
+     * 文件校验进度监听
+     *
+     * 如果文件校验不通过则会抛出异常，异步下载则会回调 [onError]
+     */
+    fun onVerifyFile(onVerifyFile: ((percent: Float, totalCopied: Long, totalSize: Long) -> Unit)): DownloadRequest {
+        this.onVerifyFile = onVerifyFile
         return this
     }
 }
