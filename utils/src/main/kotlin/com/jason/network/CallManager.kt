@@ -5,7 +5,6 @@ import okhttp3.EventListener
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import java.io.IOException
-import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
 
