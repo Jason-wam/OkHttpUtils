@@ -7,15 +7,27 @@ import okio.use
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
-import java.net.InetAddress
-import java.net.InetSocketAddress
-import java.net.Proxy
 import java.nio.charset.Charset
 import java.util.concurrent.TimeUnit
 
 object OkHttpClientUtil {
-    private val calls by lazy { HashMap<String, Call>() }
-    private var client: OkHttpClient = buildClient()
+    private val callManager by lazy { CallManager() }
+    private var client: OkHttpClient = OkHttpClient.Builder().apply {
+        trustSSLCertificate()
+        followRedirects(true)
+        followSslRedirects(true)
+        hostnameVerifier { _, _ -> true }
+        retryOnConnectionFailure(true)
+        callTimeout(60, TimeUnit.SECONDS)
+        connectTimeout(60, TimeUnit.SECONDS)
+        readTimeout(60, TimeUnit.SECONDS)
+        writeTimeout(60, TimeUnit.SECONDS)
+        dispatcher(Dispatcher().apply {
+            maxRequests = 64
+        })
+        callManager.bind(this)
+    }.build()
+
     private val downloadClient by lazy {
         client.newBuilder().apply {
             callTimeout(10, TimeUnit.DAYS)
@@ -23,88 +35,6 @@ object OkHttpClientUtil {
             readTimeout(10, TimeUnit.DAYS)
             writeTimeout(10, TimeUnit.DAYS)
         }.build()
-    }
-
-    private fun buildClient(config: (OkHttpClient.Builder.() -> Unit)? = null): OkHttpClient {
-        return OkHttpClient.Builder().apply {
-            trustSSLCertificate()
-            followRedirects(true)
-            followSslRedirects(true)
-            hostnameVerifier { _, _ -> true }
-            retryOnConnectionFailure(true)
-            callTimeout(60, TimeUnit.SECONDS)
-            connectTimeout(60, TimeUnit.SECONDS)
-            readTimeout(60, TimeUnit.SECONDS)
-            writeTimeout(60, TimeUnit.SECONDS)
-            dispatcher(Dispatcher().apply {
-                maxRequests = 20
-            })
-
-            eventListener(object : EventListener() {
-                override fun callStart(call: Call) {
-                    super.callStart(call)
-                    calls[call.request().url.toString()] = call
-                    OkhttpLogger.i("OkHttpClient", "callStart: ${call.request()}")
-                }
-
-                override fun callFailed(call: Call, ioe: IOException) {
-                    super.callFailed(call, ioe)
-                    calls.remove(call.request().url.toString())
-                    OkhttpLogger.e("OkHttpClient", "callFailed: ${call.request()} , reason: $ioe")
-                }
-
-                override fun callEnd(call: Call) {
-                    super.callEnd(call)
-                    calls.remove(call.request().url.toString())
-                    OkhttpLogger.i("OkHttpClient", "callEnd: ${call.request()}")
-                }
-
-                override fun canceled(call: Call) {
-                    super.canceled(call)
-                    calls.remove(call.request().url.toString())
-                    OkhttpLogger.i("OkHttpClient", "canceled: ${call.request()}")
-                }
-
-                override fun connectFailed(
-                    call: Call,
-                    inetSocketAddress: InetSocketAddress,
-                    proxy: Proxy,
-                    protocol: Protocol?,
-                    ioe: IOException
-                ) {
-                    super.connectFailed(call, inetSocketAddress, proxy, protocol, ioe)
-                    calls.remove(call.request().url.toString())
-                    OkhttpLogger.e("OkHttpClient", "connectFailed: ${call.request()} , reason: $ioe")
-                }
-
-                override fun dnsStart(call: Call, domainName: String) {
-                    super.dnsStart(call, domainName)
-                    OkhttpLogger.i("OkHttpClient", "dnsStart: ${call.request()} , domainName: $domainName")
-                }
-
-                override fun dnsEnd(
-                    call: Call, domainName: String, inetAddressList: List<InetAddress>
-                ) {
-                    super.dnsEnd(call, domainName, inetAddressList)
-                    OkhttpLogger.i(
-                        "OkHttpClient",
-                        "dnsEnd: ${call.request()} , domainName: $domainName , inetAddressList: ${inetAddressList.size}"
-                    )
-                }
-
-                override fun requestFailed(call: Call, ioe: IOException) {
-                    super.requestFailed(call, ioe)
-                    calls.remove(call.request().url.toString())
-                    OkhttpLogger.e("OkHttpClient", "requestFailed: ${call.request()} , reason: $ioe")
-                }
-
-                override fun responseFailed(call: Call, ioe: IOException) {
-                    super.responseFailed(call, ioe)
-                    calls.remove(call.request().url.toString())
-                    OkhttpLogger.e("OkHttpClient", "responseFailed: ${call.request()} , reason: $ioe")
-                }
-            })
-        }.apply { if (config != null) apply(config) }.build()
     }
 
     fun setClient(config: (OkHttpClient.Builder.() -> Unit)? = null) {
@@ -115,6 +45,10 @@ object OkHttpClientUtil {
 
     fun setCacheDir(cacheDir: File) {
         OkHttpCacheStore.init(cacheDir)
+    }
+
+    fun setLogEnabled(enable: Boolean) {
+        OkhttpLogger.enabled = enable
     }
 
     fun newClient(config: (OkHttpClient.Builder.() -> Unit)? = null): OkHttpClient {
@@ -328,9 +262,7 @@ object OkHttpClientUtil {
         onError: ((e: Exception) -> Unit)? = null,
         onSucceed: ((body: String) -> Unit)? = null
     ) {
-        BoxedRequest().apply(config).let {
-            enqueue(it, onError, onSucceed)
-        }
+        enqueue(BoxedRequest().apply(config), onError, onSucceed)
     }
 
     /**
@@ -472,7 +404,9 @@ object OkHttpClientUtil {
         downloadClient.newCall(newRequest).execute().use { response ->
             if (response.isRedirect) {
                 val location = response.header("Location")
-                if (location?.isNotBlank() == true) {
+                if (location?.isNotEmpty() != true) {
+                    throw IOException("Redirect url is empty!")
+                } else {
                     println("redirect to $location")
                     return download(
                         newRequest.newBuilder().url(location).build(),
@@ -482,8 +416,6 @@ object OkHttpClientUtil {
                         rangeDownload,
                         onProgress
                     )
-                } else {
-                    throw IOException("Redirect url is empty!")
                 }
             } else {
                 if (!response.isSuccessful && response.code != 416) {
@@ -491,80 +423,86 @@ object OkHttpClientUtil {
                 } else {
                     val file = File(directory, filename ?: response.fileName())
                     val contentLength = response.body?.contentLength() ?: -1L
-                    val configFile = File(directory, "$filename.cfg")
-                    if (response.code == 416) { //416一般为请求的文件大小范围超出服务器文件大小范围
-                        if (file.exists() && file.length() > 0L) {
-                            configFile.delete()
-                            return file
-                        } else {
-                            throw IOException("Request content range error, code : ${response.code}")
-                        }
-                    } else if (response.code == 206) {
-                        //Content-Range: bytes 18333696-6114656255/6114656256
-                        val rangeInfo = response.headers["Content-Range"]
-                        if (rangeInfo == null) {
-                            throw IOException("Content-Range is null!")
-                        } else {
-                            val range = rangeInfo.substringAfter("bytes").substringBefore("/")
-                            val startPos = range.substringBefore("-").trim().toLong()
-
-                            println("断点续传: startPos = $startPos")
-
-                            //如果文件已存在，则读取配置文件中的TotalBytes
-                            var fullBytes = -1L
-                            val localFileBytes = file.length()
-                            if (configFile.exists()) {
-                                fullBytes = configFile.reader().use {
-                                    it.readText().substringAfter("ContentLength=").toLong()
-                                }
-                            }
-
-                            response.body?.source()?.inputStream()?.use { input ->
-                                RandomAccessFile(file, "rwd").use {
-                                    it.seek(startPos)
-                                    input.copyTo(contentLength, it) { percent, bytesCopied, totalBytes ->
-                                        if (fullBytes == -1L) {
-                                            onProgress?.invoke(percent, bytesCopied, totalBytes)
-                                        } else {
-                                            val newBytesCopied = localFileBytes + bytesCopied
-                                            val newPercent = newBytesCopied / fullBytes.toFloat() * 100
-                                            onProgress?.invoke(newPercent, newBytesCopied, fullBytes)
-                                        }
-                                    }
-                                }
-                            } ?: let {
-                                throw IOException("Response body is null!")
-                            }
-                        }
-
-                        configFile.delete()
-                        return file
-                    } else {
-                        if (overwrite && file.exists()) {
-                            file.delete()
-                            configFile.delete()
-                        }
-
-                        if (file.exists() && file.length() == contentLength) {
-                            return file
-                        } else {
-                            configFile.outputStream().writer().use {
-                                it.write("ContentLength=$contentLength")
-                            }
-                            response.body?.source()?.inputStream()?.use { input ->
-                                file.createNewFile()
-                                file.outputStream().use { out ->
-                                    if (onProgress == null) {
-                                        input.copyTo(out)
-                                    } else {
-                                        input.copyTo(contentLength, out, onProgress)
-                                    }
-                                }
+                    val configFile = File(directory, "$${file.name}.cfg")
+                    when (response.code) {
+                        416 -> { //416一般为请求的文件大小范围超出服务器文件大小范围
+                            if (file.exists() && file.length() > 0L) {
                                 configFile.delete()
                                 return file
-                            } ?: let {
+                            } else {
+                                throw IOException("Request content range error, code : ${response.code}")
+                            }
+                        }
+
+                        206 -> {
+                            //Content-Range: bytes 18333696-6114656255/6114656256
+                            val rangeInfo = response.headers["Content-Range"]
+                            if (rangeInfo == null) {
+                                throw IOException("Content-Range is null!")
+                            } else {
+                                val range = rangeInfo.substringAfter("bytes").substringBefore("/")
+                                val startPos = range.substringBefore("-").trim().toLong()
+
+                                println("断点续传: startPos = $startPos")
+
+                                //如果文件已存在，则读取配置文件中的TotalBytes
+                                var fullBytes = -1L
+                                val localFileBytes = file.length()
+                                if (configFile.exists()) {
+                                    fullBytes = configFile.reader().use {
+                                        it.readText().substringAfter("ContentLength=").toLong()
+                                    }
+                                }
+
+                                response.body?.source()?.inputStream()?.use { input ->
+                                    RandomAccessFile(file, "rwd").use {
+                                        it.seek(startPos)
+                                        input.copyTo(contentLength, it) { percent, bytesCopied, totalBytes ->
+                                            if (fullBytes == -1L) {
+                                                onProgress?.invoke(percent, bytesCopied, totalBytes)
+                                            } else {
+                                                val newBytesCopied = localFileBytes + bytesCopied
+                                                val newPercent = newBytesCopied / fullBytes.toFloat() * 100
+                                                onProgress?.invoke(newPercent, newBytesCopied, fullBytes)
+                                            }
+                                        }
+                                    }
+                                } ?: let {
+                                    throw IOException("Response body is null!")
+                                }
+                            }
+
+                            configFile.delete()
+                            return file
+                        }
+
+                        else -> {
+                            if (overwrite && file.exists()) {
+                                file.delete()
                                 configFile.delete()
-                                throw IOException("Response body is null!")
+                            }
+
+                            if (file.exists() && file.length() == contentLength) {
+                                return file
+                            } else {
+                                configFile.outputStream().writer().use {
+                                    it.write("ContentLength=$contentLength")
+                                }
+                                response.body?.source()?.inputStream()?.use { input ->
+                                    file.createNewFile()
+                                    file.outputStream().use { out ->
+                                        if (onProgress == null) {
+                                            input.copyTo(out)
+                                        } else {
+                                            input.copyTo(contentLength, out, onProgress)
+                                        }
+                                    }
+                                    configFile.delete()
+                                    return file
+                                } ?: let {
+                                    configFile.delete()
+                                    throw IOException("Response body is null!")
+                                }
                             }
                         }
                     }
@@ -658,82 +596,90 @@ object OkHttpClientUtil {
                         } else {
                             try {
                                 val file = File(directory, filename ?: response.fileName())
-                                val configFile = File(directory, "$filename.cfg")
+                                val configFile = File(directory, "${file.name}.cfg")
                                 val contentLength = response.body?.contentLength() ?: -1L
-                                if (response.code == 416) {//416一般为请求的文件大小范围超出服务器文件大小范围
-                                    if (file.exists() && file.length() > 0L) {
-                                        configFile.delete()
-                                        onSucceed?.invoke(file)
-                                    } else {
-                                        onError?.invoke(IOException("Request content range error, code : ${response.code}"))
-                                    }
-                                } else if (response.code == 206) {
-                                    //Content-Range: bytes 18333696-6114656255/6114656256
-                                    val rangeInfo = response.headers["Content-Range"]
-                                    if (rangeInfo == null) {
-                                        onError?.invoke(IOException("Content-Range is null!"))
-                                    } else {
-                                        val range = rangeInfo.substringAfter("bytes").substringBefore("/")
-                                        val startPos = range.substringBefore("-").trim().toLong()
-
-                                        println("断点续传: startPos = $startPos")
-
-                                        //如果文件已存在，则读取配置文件中的TotalBytes
-                                        var fullBytes = -1L
-                                        val localFileBytes = file.length()
-                                        if (configFile.exists()) {
-                                            try {
-                                                fullBytes = configFile.reader().use {
-                                                    it.readText().substringAfter("ContentLength=").toLong()
-                                                }
-                                            } catch (e: Exception) {
-                                                e.printStackTrace()
-                                            }
+                                when (response.code) {
+                                    416 -> {//416一般为请求的文件大小范围超出服务器文件大小范围
+                                        if (file.exists() && file.length() > 0L) {
+                                            configFile.delete()
+                                            onSucceed?.invoke(file)
+                                        } else {
+                                            onError?.invoke(IOException("Request content range error, code : ${response.code}"))
                                         }
+                                    }
 
-                                        response.body?.source()?.inputStream()?.use { input ->
-                                            RandomAccessFile(file, "rwd").use {
-                                                it.seek(startPos)
-                                                input.copyTo(contentLength, it) { percent, bytesCopied, totalBytes ->
-                                                    if (fullBytes == -1L) {
-                                                        onProgress?.invoke(percent, bytesCopied, totalBytes)
-                                                    } else {
-                                                        val newBytesCopied = localFileBytes + bytesCopied
-                                                        val newPercent = newBytesCopied / fullBytes.toFloat() * 100
-                                                        onProgress?.invoke(newPercent, newBytesCopied, fullBytes)
+                                    206 -> {
+                                        //Content-Range: bytes 18333696-6114656255/6114656256
+                                        val rangeInfo = response.headers["Content-Range"]
+                                        if (rangeInfo == null) {
+                                            onError?.invoke(IOException("Content-Range is null!"))
+                                        } else {
+                                            val range = rangeInfo.substringAfter("bytes").substringBefore("/")
+                                            val startPos = range.substringBefore("-").trim().toLong()
+
+                                            println("断点续传: startPos = $startPos")
+
+                                            //如果文件已存在，则读取配置文件中的TotalBytes
+                                            var fullBytes = -1L
+                                            val localFileBytes = file.length()
+                                            if (configFile.exists()) {
+                                                try {
+                                                    fullBytes = configFile.reader().use {
+                                                        it.readText().substringAfter("ContentLength=").toLong()
+                                                    }
+                                                } catch (e: Exception) {
+                                                    e.printStackTrace()
+                                                }
+                                            }
+
+                                            response.body?.source()?.inputStream()?.use { input ->
+                                                RandomAccessFile(file, "rwd").use {
+                                                    it.seek(startPos)
+                                                    input.copyTo(
+                                                        contentLength, it
+                                                    ) { percent, bytesCopied, totalBytes ->
+                                                        if (fullBytes == -1L) {
+                                                            onProgress?.invoke(percent, bytesCopied, totalBytes)
+                                                        } else {
+                                                            val newBytesCopied = localFileBytes + bytesCopied
+                                                            val newPercent = newBytesCopied / fullBytes.toFloat() * 100
+                                                            onProgress?.invoke(newPercent, newBytesCopied, fullBytes)
+                                                        }
                                                     }
                                                 }
+                                                configFile.delete()
+                                                onSucceed?.invoke(file)
+                                            } ?: let {
+                                                onError?.invoke(IOException("Response body is null!"))
                                             }
+                                        }
+                                    }
+
+                                    else -> {
+                                        if (overwrite && file.exists()) {
+                                            file.delete()
                                             configFile.delete()
+                                        }
+                                        if (file.exists() && file.length() == contentLength) {
                                             onSucceed?.invoke(file)
-                                        } ?: let {
-                                            onError?.invoke(IOException("Response body is null!"))
-                                        }
-                                    }
-                                } else {
-                                    if (overwrite && file.exists()) {
-                                        file.delete()
-                                        configFile.delete()
-                                    }
-                                    if (file.exists() && file.length() == contentLength) {
-                                        onSucceed?.invoke(file)
-                                    } else {
-                                        configFile.outputStream().writer().use {
-                                            it.write("ContentLength=$contentLength")
-                                        }
-                                        response.body?.source()?.inputStream()?.use { input ->
-                                            file.createNewFile()
-                                            file.outputStream().use { out ->
-                                                if (onProgress == null) {
-                                                    input.copyTo(out)
-                                                } else {
-                                                    input.copyTo(contentLength, out, onProgress)
+                                        } else {
+                                            configFile.outputStream().writer().use {
+                                                it.write("ContentLength=$contentLength")
+                                            }
+                                            response.body?.source()?.inputStream()?.use { input ->
+                                                file.createNewFile()
+                                                file.outputStream().use { out ->
+                                                    if (onProgress == null) {
+                                                        input.copyTo(out)
+                                                    } else {
+                                                        input.copyTo(contentLength, out, onProgress)
+                                                    }
                                                 }
+                                                configFile.delete()
+                                                onSucceed?.invoke(file)
+                                            } ?: let {
+                                                onError?.invoke(IOException("Response body is null!"))
                                             }
-                                            configFile.delete()
-                                            onSucceed?.invoke(file)
-                                        } ?: let {
-                                            onError?.invoke(IOException("Response body is null!"))
                                         }
                                     }
                                 }
@@ -748,21 +694,14 @@ object OkHttpClientUtil {
     }
 
     fun cancel(call: Call) {
-        call.cancel()
-        calls.remove(call.request().cacheKey)
+        callManager.cancel(call)
     }
 
     fun cancelByTag(tag: Any) {
-        calls.filter {
-            it.value.request().tag() == tag
-        }.onEach {
-            it.value.cancel()
-        }.forEach {
-            calls.remove(it.key)
-        }
+        callManager.cancelByTag(tag)
     }
 
     fun cancelAll() {
-        calls.onEach { it.value.cancel() }.clear()
+        callManager.cancelAll()
     }
 }
