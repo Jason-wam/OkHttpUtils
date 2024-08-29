@@ -100,9 +100,9 @@ object OkHttpClientUtil {
      *
      * @param config 请求的配置块，用于在执行请求前设置请求的各种参数
      * @return 返回请求的执行结果，类型为String
-     * @throws IOException 如果请求执行过程中发生输入输出异常，则抛出此异常
+     * @throws Exception 如果请求执行过程中发生异常，则抛出此异常
      */
-    @Throws(IOException::class)
+    @Throws(Exception::class)
     fun execute(config: BoxedRequest.() -> Unit): String {
         return execute(BoxedRequest().apply(config))
     }
@@ -114,7 +114,7 @@ object OkHttpClientUtil {
      * @return 返回一个字符串类型的响应结果，通常为JSON、XML或其他自定义的格式，
      *         具体格式取决于系统设计和业务需求
      */
-    @Throws(IOException::class)
+    @Throws(Exception::class)
     fun execute(request: BoxedRequest): String {
         return when (request.cacheMode) {
             CacheMode.ONLY_CACHE -> {
@@ -334,7 +334,7 @@ object OkHttpClientUtil {
         }
     }
 
-    @Throws(IOException::class)
+    @Throws(Exception::class)
     fun download(config: DownloadRequest.() -> Unit): File {
         val request = DownloadRequest().apply(config)
         if (request.saveDirectory == null) throw IOException("SaveDirectory is null!")
@@ -354,7 +354,7 @@ object OkHttpClientUtil {
         }
     }
 
-    @Throws(IOException::class)
+    @Throws(Exception::class)
     fun download(request: DownloadRequest): File {
         if (request.saveDirectory == null) throw IOException("SaveDirectory is null!")
         return download(
@@ -373,7 +373,7 @@ object OkHttpClientUtil {
         }
     }
 
-    @Throws(IOException::class)
+    @Throws(Exception::class)
     fun download(
         url: String,
         directory: File,
@@ -392,7 +392,7 @@ object OkHttpClientUtil {
         )
     }
 
-    @Throws(IOException::class)
+    @Throws(Exception::class)
     fun download(
         request: Request,
         directory: File,
@@ -422,20 +422,20 @@ object OkHttpClientUtil {
 
         fun verifyFile(file: File) {
             if (md5.isNotEmpty()) {
-                if(!file.verifyMD5(md5, onVerifyFile)){
-                    throw IOException("File MD5 verification failed!")
+                if (!file.verifyMD5(md5, onVerifyFile)) {
+                    throw FileVerificationException("File MD5 verification failed!")
                 }
             }
 
             if (sha1.isNotEmpty()) {
-                if(!file.verifySHA1(sha1, onVerifyFile)){
-                    throw IOException("File SHA-1 verification failed!")
+                if (!file.verifySHA1(sha1, onVerifyFile)) {
+                    throw FileVerificationException("File SHA-1 verification failed!")
                 }
             }
 
             if (sha256.isNotEmpty()) {
-                if(file.verifyShA256(sha256, onVerifyFile)){
-                    throw IOException("File SHA-256 verification failed!")
+                if (file.verifyShA256(sha256, onVerifyFile)) {
+                    throw FileVerificationException("File SHA-256 verification failed!")
                 }
             }
         }
@@ -616,7 +616,7 @@ object OkHttpClientUtil {
                     if (file.verifyMD5(md5, onVerifyFile)) {
                         onSucceed?.invoke(file)
                     } else {
-                        onError?.invoke(IOException("File MD5 verification failed!"))
+                        onError?.invoke(FileVerificationException("File MD5 verification failed!"))
                     }
                     return
                 }
@@ -625,7 +625,7 @@ object OkHttpClientUtil {
                     if (file.verifySHA1(sha1, onVerifyFile)) {
                         onSucceed?.invoke(file)
                     } else {
-                        onError?.invoke(IOException("File SHA-1 verification failed!"))
+                        onError?.invoke(FileVerificationException("File SHA-1 verification failed!"))
                     }
                     return
                 }
@@ -634,7 +634,7 @@ object OkHttpClientUtil {
                     if (file.verifyShA256(sha256, onVerifyFile)) {
                         onSucceed?.invoke(file)
                     } else {
-                        onError?.invoke(IOException("File SHA-256 verification failed!"))
+                        onError?.invoke(FileVerificationException("File SHA-256 verification failed!"))
                     }
                     return
                 }
