@@ -24,9 +24,12 @@ tasks.test {
 kotlin {
     jvmToolchain(17)
 }
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+}
 
-
-val libVersion = "1.1.2"
+val libVersion = "1.1.5"
 
 tasks.withType<Jar> {
     archiveBaseName.set("selector") // 设置构件的基本名称
@@ -35,7 +38,7 @@ tasks.withType<Jar> {
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
     compilerOptions {
-        jvmTarget.set(JvmTarget.JVM_17) // 设置 JVM 目标版本
+        jvmTarget.set(JvmTarget.JVM_1_8) // 设置 JVM 目标版本
     }
 }
 

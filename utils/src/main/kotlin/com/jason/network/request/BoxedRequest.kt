@@ -10,9 +10,9 @@ import okhttp3.RequestBody
 import okhttp3.Response
 
 class BoxedRequest<R> {
-    internal var charset: String = "utf-8"
-    internal var cacheValidDuration: Long = CacheValidDuration.FOREVER
-    internal var cacheMode: CacheMode = CacheMode.ONLY_NETWORK
+    var charset: String = "utf-8"
+    var cacheValidDuration: Long = CacheValidDuration.FOREVER
+    var cacheMode: CacheMode = CacheMode.ONLY_NETWORK
     internal var onError: ((e: Exception) -> Unit)? = null
     internal var onSuccess: ((body: R) -> Unit)? = null
     internal var onResponse: ((response: Response) -> Unit)? = null
