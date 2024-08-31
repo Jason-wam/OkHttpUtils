@@ -12,6 +12,7 @@ repositories {
 dependencies {
     testImplementation(kotlin("test"))
     implementation(project(":utils"))
+    implementation("org.json:json:20220320")
 }
 
 tasks.test {

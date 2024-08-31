@@ -4,16 +4,15 @@ import java.net.MalformedURLException
 import java.net.URL
 import java.net.URLEncoder
 
-/**
- * @Author: 进阶的面条
- * @Date: 2022-01-10 23:38
- */
-class UrlBuilder(private val baseUrl: String) {
-    private var builder = StringBuilder()
+class UrlBuilder {
+    private var host: String = ""
+    private var path = ""
+    private var params = HashMap<String, String>()
     private var charset = "utf-8"
 
-    init {
-        builder.append(baseUrl)
+    fun host(host: String): UrlBuilder {
+        this.host = host
+        return this
     }
 
     fun charset(charset: String): UrlBuilder {
@@ -22,32 +21,25 @@ class UrlBuilder(private val baseUrl: String) {
     }
 
     fun path(value: String): UrlBuilder {
-        if (builder.endsWith("/")) {
-            builder.append(value.removePrefix("/"))
+        path = if (host.endsWith("/")) {
+            value.removePrefix("/")
         } else {
-            builder.append("/").append(value.removePrefix("/"))
+            "/" + value.removePrefix("/")
         }
         return this
     }
 
     fun param(key: String, value: Any): UrlBuilder {
-        if (builder.contains("?")) {
-            builder.append("&").append(key).append("=").append(value.toString().encode(charset))
-        } else {
-            builder.append("?").append(key).append("=").append(value.toString().encode(charset))
-        }
+        params[key] = value.toString()
         return this
     }
 
     fun abs(second: String): UrlBuilder {
         if (second.startsWith("http")) {
-            builder.clear()
-            builder.append(second)
+            host = second
         } else {
             try {
-                val newURL = URL(URL(baseUrl), second)
-                builder.clear()
-                builder.append(newURL.toString())
+                host = URL(URL(host), second).toString()
             } catch (e: MalformedURLException) {
                 e.printStackTrace()
             }
@@ -60,6 +52,16 @@ class UrlBuilder(private val baseUrl: String) {
     }
 
     fun build(): String {
-        return builder.toString()
+        return buildString {
+            append(host)
+            append(path)
+            params.forEach {
+                if (contains("?")) {
+                    append("&").append(it.key).append("=").append(it.value.encode(charset))
+                } else {
+                    append("?").append(it.key).append("=").append(it.value.encode(charset))
+                }
+            }
+        }
     }
 }

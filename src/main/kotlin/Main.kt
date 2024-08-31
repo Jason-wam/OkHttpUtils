@@ -2,13 +2,19 @@ package com.jason.selector
 
 import com.jason.network.CacheMode
 import com.jason.network.OkHttpClientUtil
+import com.jason.network.UrlBuilder
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 
 fun main() {
     OkHttpClientUtil.setCacheDir(File("D:/OKHttpCache"))
 
+    println(
+        UrlBuilder().host("https://api.bilibili.com/").path("x/click-interface/click/now").param("from","Android").build()
+    )
 
-    download()
+    enqueue2()
 
 }
 
@@ -32,7 +38,7 @@ fun download() {
             println("下载失败： ${it.message}")
         }
 
-        onSucceed {
+        onSuccess {
             println()
             println("下载成功： $it")
         }
@@ -44,20 +50,24 @@ fun download() {
 }
 
 fun execute() {
-    val result = OkHttpClientUtil.execute {
+    val result = OkHttpClientUtil.execute<JSONObject> {
         url("https://api.bilibili.com/x/click-interface/click/now")
         setCacheMode(CacheMode.ONLY_NETWORK)
         header(
             "User-Agent",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         )
+
+        onResponse {
+            println(it.body?.contentType())
+        }
     }
 
-    println("请求成功： $result")
+    println("请求成功： ${result.toString(2)}")
 }
 
 fun execute2() {
-    OkHttpClientUtil.execute {
+    OkHttpClientUtil.execute<String> {
         url("https://api.bilibili.com/x/click-interface/click/now")
         setCacheMode(CacheMode.ONLY_NETWORK)
         header(
@@ -71,32 +81,24 @@ fun execute2() {
         }
 
         //由于是同步请求，所以在回调此处代码块时也会直接返回数据
-        onSucceed {
+        onSuccess {
             println("请求成功： $it")
         }
     }
 }
 
-fun enqueue() {
-    OkHttpClientUtil.enqueue(config = {
-        url("https://api.bilibili.com/x/click-interface/click/now")
-        setCacheMode(CacheMode.ONLY_NETWORK)
-    }, onError = {
-        println("请求失败： ${it.message}")
-    }, onSucceed = {
-        println("请求成功： $it")
-    })
-}
 
 fun enqueue2() {
-    OkHttpClientUtil.enqueue {
-        url("https://api.bilibili.com/x/click-interface/click/now")
-        setCacheMode(CacheMode.ONLY_NETWORK)
+    OkHttpClientUtil.enqueue<JSONObject> {
+        url("https://api.bilibili.com/")
+        param("from", "Android")
+        path("x/click-interface/click/now")
+        setCacheMode(CacheMode.NETWORK_ELSE_CACHE)
         onError {
-            println("请求失败： ${it.message}")
+            println("请求失败： ${it.stackTraceToString()}")
         }
-        onSucceed {
-            println("请求成功： $it")
+        onSuccess {
+            println("请求成功： \n${it.toString(2)}")
         }
     }
 }

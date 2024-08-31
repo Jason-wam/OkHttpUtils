@@ -2,6 +2,7 @@ package com.jason.network.request
 
 import okhttp3.Headers
 import okhttp3.Request
+import okhttp3.Response
 import java.io.File
 
 class DownloadRequest {
@@ -10,7 +11,9 @@ class DownloadRequest {
     internal var saveDirectory: File? = null
     internal var overwrite: Boolean = false
     internal var onError: ((e: Exception) -> Unit)? = null
-    internal var onSucceed: ((file: File) -> Unit)? = null
+    internal var onSuccess: ((file: File) -> Unit)? = null
+    internal var onResponse: ((response: Response) -> Unit)? = null
+
     internal var onProgress: ((percent: Float, downloadBytes: Long, totalBytes: Long) -> Unit)? = null
     internal var rangeDownload: Boolean = false
     internal var md5: String = ""
@@ -90,8 +93,8 @@ class DownloadRequest {
         return this
     }
 
-    fun onSucceed(onSucceed: ((file: File) -> Unit)): DownloadRequest {
-        this.onSucceed = onSucceed
+    fun onSuccess(onSuccess: ((file: File) -> Unit)): DownloadRequest {
+        this.onSuccess = onSuccess
         return this
     }
 
@@ -137,6 +140,14 @@ class DownloadRequest {
      */
     fun onVerifyFile(onVerifyFile: ((percent: Float, totalCopied: Long, totalSize: Long) -> Unit)): DownloadRequest {
         this.onVerifyFile = onVerifyFile
+        return this
+    }
+
+    /**
+     * 在 [onError] 或 [onSuccess] 前回调 Response
+     */
+    fun onResponse(onResponse: ((response: Response) -> Unit)): DownloadRequest {
+        this.onResponse = onResponse
         return this
     }
 }

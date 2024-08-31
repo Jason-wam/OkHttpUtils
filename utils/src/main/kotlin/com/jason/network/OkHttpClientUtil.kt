@@ -1,5 +1,9 @@
 package com.jason.network
 
+import com.jason.network.converter.JSONArrayConverter
+import com.jason.network.converter.JSONObjectConverter
+import com.jason.network.converter.ResponseConverter
+import com.jason.network.converter.StringConverter
 import com.jason.network.request.BoxedRequest
 import com.jason.network.request.DownloadRequest
 import okhttp3.*
@@ -7,11 +11,16 @@ import okio.use
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
-import java.nio.charset.Charset
 import java.util.concurrent.TimeUnit
+import kotlin.reflect.KClass
 
 object OkHttpClientUtil {
     private val callManager by lazy { CallManager() }
+    private val converters = ArrayList<ResponseConverter<*>>().apply {
+        add(StringConverter())
+        add(JSONObjectConverter())
+        add(JSONArrayConverter())
+    }
     private var client: OkHttpClient = OkHttpClient.Builder().apply {
         trustSSLCertificate()
         followRedirects(true)
@@ -44,7 +53,7 @@ object OkHttpClientUtil {
     }
 
     fun setCacheDir(cacheDir: File) {
-        OkHttpCacheStore.init(cacheDir)
+        OkHttpResponseCache.init(cacheDir)
     }
 
     fun setLogEnabled(enable: Boolean) {
@@ -59,10 +68,6 @@ object OkHttpClientUtil {
         return builder.build()
     }
 
-    private fun Request.getCache(): String? {
-        return OkHttpCacheStore.get(cacheKey)
-    }
-
     /**
      * 执行同步请求
      * 此函数通过高阶函数参数接收请求配置，允许在执行前动态指定请求的各种参数
@@ -73,8 +78,18 @@ object OkHttpClientUtil {
      * @throws Exception 如果请求执行过程中发生异常，则抛出此异常
      */
     @Throws(Exception::class)
-    fun execute(config: BoxedRequest.() -> Unit): String {
-        return execute(BoxedRequest().apply(config))
+    inline fun <reified R> execute(config: BoxedRequest<R>.() -> Unit): R {
+        return execute(BoxedRequest<R>().apply(config), R::class)
+    }
+
+    fun addConverter(converter: ResponseConverter<*>) {
+        converters.add(converter)
+    }
+
+    private fun BoxedRequest<*>.findConverter(type: KClass<*>): ResponseConverter<*>? {
+        return converter ?: converters.find {
+            it.supportType() == type
+        }
     }
 
     /**
@@ -85,72 +100,72 @@ object OkHttpClientUtil {
      *         具体格式取决于系统设计和业务需求
      */
     @Throws(Exception::class)
-    fun execute(request: BoxedRequest): String {
+    @Suppress("UNCHECKED_CAST")
+    fun <R> execute(request: BoxedRequest<R>, type: KClass<*>): R {
         return when (request.cacheMode) {
             CacheMode.ONLY_CACHE -> {
-                request.request.getCache()?.let {
-                    if (request.decoder != null) request.decoder!!.convert(it) else it
-                }?.also {
-                    request.onSucceed?.invoke(it)
+                OkHttpResponseCache.get(request.request, request.cacheValidDuration)?.let {
+                    request.onResponse?.invoke(it)
+                    val converter = request.findConverter(type) as? ResponseConverter<R>
+                    if (converter == null) {
+                        throw Exception("Converter not found for $type")
+                    }
+                    converter.convert(request, it)
                 } ?: throw IOException("No cache found!")
             }
 
             CacheMode.ONLY_NETWORK -> {
-                execute(request.request, request.charset).also {
-                    OkHttpCacheStore.put(request.request.cacheKey, it, request.cacheValidDuration)
-                }.let {
-                    if (request.decoder != null) request.decoder!!.convert(it) else it
+                executeResponse(request.request).use {
+                    request.onResponse?.invoke(it)
+                    val converter = request.findConverter(type) as? ResponseConverter<R>
+                    if (converter == null) {
+                        throw Exception("Converter not found for $type")
+                    }
+                    converter.convert(request, it)
                 }.also {
-                    request.onSucceed?.invoke(it)
+                    request.onSuccess?.invoke(it)
                 }
             }
 
             CacheMode.NETWORK_ELSE_CACHE -> {
-                try {
-                    execute(request.request, request.charset).also {
-                        OkHttpCacheStore.put(request.request.cacheKey, it, request.cacheValidDuration)
-                    }.let {
-                        if (request.decoder != null) request.decoder!!.convert(it) else it
-                    }.also {
-                        request.onSucceed?.invoke(it)
-                    }
+                val response = try {
+                    executeResponse(request.request)
                 } catch (e: Exception) {
-                    e.printStackTrace()
-                    OkHttpCacheStore.get(request.request.cacheKey)?.let {
-                        if (request.decoder != null) request.decoder!!.convert(it) else it
-                    }?.also {
-                        request.onSucceed?.invoke(it)
-                    } ?: throw IOException("Request failed with code ${e.message} and no cache found!")
+                    OkHttpResponseCache.get(request.request, request.cacheValidDuration)
+                        ?: throw IOException("Request failed: ${e.message}, and no cache found!")
+                }
+                response.use {
+                    request.onResponse?.invoke(it)
+                    val converter = request.findConverter(type) as? ResponseConverter<R>
+                    if (converter == null) {
+                        throw Exception("Converter not found for $type")
+                    }
+                    converter.convert(request, it)
+                }.also {
+                    request.onSuccess?.invoke(it)
                 }
             }
 
             CacheMode.CACHE_ELSE_NETWORK -> {
-                request.request.getCache()?.let {
-                    if (request.decoder != null) request.decoder!!.convert(it) else it
-                }?.also {
-                    request.onSucceed?.invoke(it)
-                } ?: execute(request.request, request.charset).also {
-                    OkHttpCacheStore.put(request.request.cacheKey, it, request.cacheValidDuration)
-                }.let {
-                    if (request.decoder != null) request.decoder!!.convert(it) else it
+                val response =
+                    OkHttpResponseCache.get(request.request, request.cacheValidDuration) ?: executeResponse(request.request)
+
+                response.use {
+                    request.onResponse?.invoke(it)
+                    val converter = request.findConverter(type) as? ResponseConverter<R>
+                    if (converter == null) {
+                        throw Exception("Converter not found for $type")
+                    }
+                    converter.convert(request, it)
                 }.also {
-                    request.onSucceed?.invoke(it)
+                    request.onSuccess?.invoke(it)
                 }
             }
         }
     }
 
-
-    /**
-     * 执行网络请求并返回响应结果
-     *
-     * @param request 请求对象，包含了请求的URL、参数、方法等信息
-     * @param charset 字符集编码，用于解析响应体
-     * @return 响应体的内容，以字符串形式返回
-     * @throws IOException 如果请求失败、重定向出现问题或响应体解析失败时抛出此异常
-     */
     @Throws(IOException::class)
-    private fun execute(request: Request, charset: String): String {
+    fun executeResponse(request: Request): Response {
         // 发送请求并获取响应对象
         client.newCall(request).execute().use { response ->
             // 如果响应指示需要重定向
@@ -158,12 +173,12 @@ object OkHttpClientUtil {
                 // 获取重定向的位置信息，如果不存在则抛出异常
                 val location = response.header("Location") ?: throw IOException("No location found")
                 // 使用新的URL重新构建请求并执行
-                return execute(request.newBuilder().url(location).build(), charset)
+                return executeResponse(request.newBuilder().url(location).build())
             }
             // 如果请求成功
             if (response.isSuccessful) {
                 // 返回响应体的内容，使用指定的字符集进行解析
-                return response.body?.source()?.readString(Charset.forName(charset)) ?: ""
+                return OkHttpResponseCache.put(request, response)
             } else {
                 // 如果请求失败，根据响应码抛出异常
                 throw IOException("Request failed with code ${response.code}")
@@ -179,8 +194,8 @@ object OkHttpClientUtil {
      *
      * @param request BoxedRequest对象，包含了所有执行请求所需的信息
      */
-    fun enqueue(request: BoxedRequest) {
-        enqueue(request, request.onError, request.onSucceed)
+    inline fun <reified R> enqueue(request: BoxedRequest<R>) {
+        enqueue<R>(request, R::class)
     }
 
     /**
@@ -196,25 +211,115 @@ object OkHttpClientUtil {
      * 这种设计允许调用者以更加直观和便捷的方式配置和添加请求，避免了繁琐的构造器或者多个参数的方法调用
      *
      */
-    fun enqueue(config: BoxedRequest.() -> Unit) {
-        BoxedRequest().apply(config).let {
-            enqueue(it, it.onError, it.onSucceed)
+    inline fun <reified R> enqueue(config: BoxedRequest<R>.() -> Unit) {
+        val request = BoxedRequest<R>().apply(config)
+        enqueue<R>(request, R::class)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    fun <R> enqueue(request: BoxedRequest<R>, type: KClass<*>) {
+        when (request.cacheMode) {
+            CacheMode.ONLY_CACHE -> {
+                OkHttpResponseCache.get(request.request, request.cacheValidDuration)?.also {
+                    request.onResponse?.invoke(it)
+                }?.let {
+                    val converter = request.findConverter(type) as? ResponseConverter<R>
+                    if (converter == null) {
+                        request.onError?.invoke(IOException("Converter not found for $type"))
+                    } else {
+                        try {
+                            request.onSuccess?.invoke(converter.convert(request, it))
+                        } catch (e: Exception) {
+                            request.onError?.invoke(e)
+                        }
+                    }
+                } ?: request.onError?.invoke(IOException("Cache not found!"))
+            }
+
+            CacheMode.ONLY_NETWORK -> {
+                enqueueResponse(request.request, onError = {
+                    request.onError?.invoke(it)
+                }, onSucceed = { response ->
+                    val converter = request.findConverter(type) as? ResponseConverter<R>
+                    if (converter == null) {
+                        request.onError?.invoke(IOException("Converter not found for $type"))
+                    } else {
+                        try {
+                            request.onSuccess?.invoke(converter.convert(request, response))
+                        } catch (e: Exception) {
+                            request.onError?.invoke(e)
+                        }
+                    }
+                })
+            }
+
+            CacheMode.NETWORK_ELSE_CACHE -> {
+                enqueueResponse(request.request, onError = { e ->
+                    OkHttpResponseCache.get(request.request, request.cacheValidDuration)?.let {
+                        val converter = request.findConverter(type) as? ResponseConverter<R>
+                        if (converter == null) {
+                            request.onError?.invoke(IOException("Converter not found for $type"))
+                        } else {
+                            try {
+                                request.onSuccess?.invoke(converter.convert(request, it))
+                            } catch (e: Exception) {
+                                request.onError?.invoke(e)
+                            }
+                        }
+                    } ?: let {
+                        request.onError?.invoke(IOException(buildString {
+                            append(e.message)
+                            append(" and no cache found!")
+                        }))
+                    }
+                }, onSucceed = { response ->
+                    val converter = request.findConverter(type) as? ResponseConverter<R>
+                    if (converter == null) {
+                        request.onError?.invoke(IOException("Converter not found for $type"))
+                    } else {
+                        try {
+                            request.onSuccess?.invoke(converter.convert(request, response))
+                        } catch (e: Exception) {
+                            request.onError?.invoke(e)
+                        }
+                    }
+                })
+            }
+
+            CacheMode.CACHE_ELSE_NETWORK -> {
+                OkHttpResponseCache.get(request.request, request.cacheValidDuration)?.also {
+                    request.onResponse?.invoke(it)
+                }?.let {
+                    val converter = request.findConverter(type) as? ResponseConverter<R>
+                    if (converter == null) {
+                        request.onError?.invoke(IOException("Converter not found for $type"))
+                    } else {
+                        try {
+                            request.onSuccess?.invoke(converter.convert(request, it))
+                        } catch (e: Exception) {
+                            request.onError?.invoke(e)
+                        }
+                    }
+                } ?: enqueueResponse(request.request, onError = {
+                    request.onError?.invoke(it)
+                }, onSucceed = { response ->
+                    val converter = request.findConverter(type) as? ResponseConverter<R>
+                    if (converter == null) {
+                        request.onError?.invoke(IOException("Converter not found for $type"))
+                    } else {
+                        try {
+                            request.onSuccess?.invoke(converter.convert(request, response))
+                        } catch (e: Exception) {
+                            request.onError?.invoke(e)
+                        }
+                    }
+                })
+            }
         }
     }
 
-    /**
-     * 将请求加入队列并异步执行
-     *
-     * @param request 请求对象，包含了具体的请求方法和URL等信息
-     * @param charset 请求数据的字符集，用于正确解析响应体
-     * @param onError 错误回调，当请求发生异常时被调用默认为空
-     * @param onSucceed 成功回调，当请求成功完成时被调用，传入解析后的响应体
-     */
-    private fun enqueue(
-        request: Request,
-        charset: String,
-        onError: ((e: Exception) -> Unit)? = null,
-        onSucceed: ((body: String) -> Unit)? = null
+    fun enqueueResponse(
+        request: Request, onError: ((e: Exception) -> Unit)? = null, onSucceed: ((response: Response) -> Unit)? = null
     ) {
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
@@ -228,13 +333,13 @@ object OkHttpClientUtil {
                     if (response.isRedirect) {
                         val location = response.header("Location")
                         if (location?.isNotBlank() == true) {
-                            enqueue(request.newBuilder().url(location).build(), charset, onError, onSucceed)
+                            enqueueResponse(request.newBuilder().url(location).build(), onError, onSucceed)
                         } else {
                             onError?.invoke(IOException("Response is redirect but location not found!"))
                         }
                     } else {
                         if (response.isSuccessful) {
-                            onSucceed?.invoke(response.body?.source()?.readString(Charset.forName(charset)) ?: "")
+                            onSucceed?.invoke(OkHttpResponseCache.put(request, response))
                         } else {
                             onError?.invoke(IOException("Request failed with code ${response.code}"))
                         }
@@ -242,75 +347,6 @@ object OkHttpClientUtil {
                 }
             }
         })
-    }
-
-    /**
-     * 将请求加入队列并处理结果
-     *
-     * 该函数的主要作用是将一个封装好的请求对象加入处理队列，并在请求处理完毕后
-     * 调用相应的回调函数处理结果或错误。这个机制常用于异步操作，比如网络请求或者
-     * 文件操作等，可以有效地分离请求的发起和处理逻辑，提高程序的可读性和可维护性。
-     *
-     * @param request 请求对象，包含了所有执行操作所需的信息
-     * @param onError 错误回调函数，当请求处理发生异常时被调用。默认为null，表示不处理错误
-     * @param onSucceed 成功回调函数，当请求处理成功时被调用，携带处理结果的字符串表示
-     */
-    private fun enqueue(
-        request: BoxedRequest, onError: ((e: Exception) -> Unit)? = null, onSucceed: ((body: String) -> Unit)? = null
-    ) {
-        when (request.cacheMode) {
-            CacheMode.ONLY_CACHE -> {
-                request.request.getCache()?.let {
-                    if (request.decoder != null) request.decoder!!.convert(it) else it
-                }?.let {
-                    onSucceed?.invoke(it)
-                } ?: let {
-                    onError?.invoke(IOException("No cache found!"))
-                }
-            }
-
-            CacheMode.ONLY_NETWORK -> {
-                enqueue(request.request, request.charset, onError = {
-                    onError?.invoke(it)
-                }, onSucceed = {
-                    OkHttpCacheStore.put(request.request.cacheKey, it, request.cacheValidDuration)
-                    onSucceed?.invoke(it.let {
-                        if (request.decoder != null) request.decoder!!.convert(it) else it
-                    })
-                })
-            }
-
-            CacheMode.NETWORK_ELSE_CACHE -> {
-                enqueue(request.request, request.charset, onError = { e ->
-                    request.request.getCache()?.let {
-                        onSucceed?.invoke(it)
-                    } ?: let {
-                        onError?.invoke(IOException(buildString {
-                            append(e.message)
-                            append(" and no cache found!")
-                        }))
-                    }
-                }, onSucceed = {
-                    OkHttpCacheStore.put(request.request.cacheKey, it, request.cacheValidDuration)
-                    onSucceed?.invoke(it.let {
-                        if (request.decoder != null) request.decoder!!.convert(it) else it
-                    })
-                })
-            }
-
-            CacheMode.CACHE_ELSE_NETWORK -> {
-                request.request.getCache()?.let {
-                    if (request.decoder != null) request.decoder!!.convert(it) else it
-                }?.let {
-                    onSucceed?.invoke(it)
-                } ?: enqueue(request.request, request.charset, onError = onError, onSucceed = {
-                    OkHttpCacheStore.put(request.request.cacheKey, it, request.cacheValidDuration)
-                    onSucceed?.invoke(it.let {
-                        if (request.decoder != null) request.decoder!!.convert(it) else it
-                    })
-                })
-            }
-        }
     }
 
     @Throws(Exception::class)
@@ -329,7 +365,7 @@ object OkHttpClientUtil {
             request.onVerifyFile,
             request.onProgress
         ).also {
-            request.onSucceed?.invoke(it)
+            request.onSuccess?.invoke(it)
         }
     }
 
@@ -348,7 +384,7 @@ object OkHttpClientUtil {
             request.onVerifyFile,
             request.onProgress
         ).also {
-            request.onSucceed?.invoke(it)
+            request.onSuccess?.invoke(it)
         }
     }
 
@@ -537,7 +573,7 @@ object OkHttpClientUtil {
                 request.onVerifyFile,
                 request.onError,
                 request.onProgress,
-                request.onSucceed
+                request.onSuccess
             )
         }
     }
@@ -559,7 +595,7 @@ object OkHttpClientUtil {
                 request.onVerifyFile,
                 request.onError,
                 request.onProgress,
-                request.onSucceed
+                request.onSuccess
             )
         }
     }

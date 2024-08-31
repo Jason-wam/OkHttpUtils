@@ -15,6 +15,7 @@ repositories {
 dependencies {
     api(libs.okhttp)
     api(libs.disklrucache)
+    implementation("org.json:json:20220320")
 }
 
 tasks.test {
@@ -25,7 +26,7 @@ kotlin {
 }
 
 
-val libVersion = "1.1.0"
+val libVersion = "1.1.2"
 
 tasks.withType<Jar> {
     archiveBaseName.set("selector") // 设置构件的基本名称
