@@ -1,9 +1,9 @@
 package com.jason.network.converter
 
+import com.jason.network.error.ConvertException
 import com.jason.network.request.BoxedRequest
 import okhttp3.Response
 import org.json.JSONArray
-import org.json.JSONObject
 import java.nio.charset.Charset
 import kotlin.reflect.KClass
 

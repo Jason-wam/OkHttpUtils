@@ -29,7 +29,7 @@ java {
     targetCompatibility = JavaVersion.VERSION_1_8
 }
 
-val libVersion = "1.1.5"
+val libVersion = "1.1.9"
 
 tasks.withType<Jar> {
     archiveBaseName.set("selector") // 设置构件的基本名称

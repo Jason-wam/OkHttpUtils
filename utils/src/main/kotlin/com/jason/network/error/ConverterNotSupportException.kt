@@ -1,3 +1,3 @@
-package com.jason.network.converter
+package com.jason.network.error
 
 class ConverterNotSupportException(): Exception()

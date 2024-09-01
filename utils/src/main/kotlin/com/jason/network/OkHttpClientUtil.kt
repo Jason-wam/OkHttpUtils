@@ -1,9 +1,12 @@
 package com.jason.network
 
+import com.jason.network.cache.CacheMode
+import com.jason.network.cache.OkHttpResponseCache
 import com.jason.network.converter.JSONArrayConverter
 import com.jason.network.converter.JSONObjectConverter
 import com.jason.network.converter.ResponseConverter
 import com.jason.network.converter.StringConverter
+import com.jason.network.error.FileVerificationException
 import com.jason.network.request.BoxedRequest
 import com.jason.network.request.DownloadRequest
 import okhttp3.*
@@ -15,13 +18,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.reflect.KClass
 
 object OkHttpClientUtil {
-    private val callManager by lazy { CallManager() }
-    private val converters = ArrayList<ResponseConverter<*>>().apply {
-        add(StringConverter())
-        add(JSONObjectConverter())
-        add(JSONArrayConverter())
-    }
-    private var client: OkHttpClient = OkHttpClient.Builder().apply {
+    var client: OkHttpClient = OkHttpClient.Builder().apply {
         trustSSLCertificate()
         followRedirects(true)
         followSslRedirects(true)
@@ -34,10 +31,10 @@ object OkHttpClientUtil {
         dispatcher(Dispatcher().apply {
             maxRequests = 64
         })
-        callManager.bind(this)
+        CallManager.bind(this)
     }.build()
 
-    private val downloadClient by lazy {
+    val downloadClient by lazy {
         client.newBuilder().apply {
             callTimeout(10, TimeUnit.DAYS)
             connectTimeout(10, TimeUnit.DAYS)
@@ -46,9 +43,15 @@ object OkHttpClientUtil {
         }.build()
     }
 
+    val converters = ArrayList<ResponseConverter<*>>().apply {
+        add(StringConverter())
+        add(JSONObjectConverter())
+        add(JSONArrayConverter())
+    }
+
     fun setClient(config: (OkHttpClient.Builder.() -> Unit)? = null) {
         if (config != null) {
-            client = client.newBuilder().apply(config).build()
+            client = client.newBuilder().apply(config).apply { CallManager.bind(this) }.build()
         }
     }
 
@@ -61,7 +64,7 @@ object OkHttpClientUtil {
     }
 
     fun newClient(config: (OkHttpClient.Builder.() -> Unit)? = null): OkHttpClient {
-        val builder = client.newBuilder()
+        val builder = client.newBuilder().apply { CallManager.bind(this) }
         if (config != null) {
             builder.apply(config)
         }
@@ -115,7 +118,7 @@ object OkHttpClientUtil {
             }
 
             CacheMode.ONLY_NETWORK -> {
-                executeResponse(request.request).use {
+                executeResponse(request.client, request.request, request.cacheValidDuration).use {
                     request.onResponse?.invoke(it)
                     val converter = request.findConverter(type) as? ResponseConverter<R>
                     if (converter == null) {
@@ -129,7 +132,7 @@ object OkHttpClientUtil {
 
             CacheMode.NETWORK_ELSE_CACHE -> {
                 val response = try {
-                    executeResponse(request.request)
+                    executeResponse(request.client, request.request, request.cacheValidDuration)
                 } catch (e: Exception) {
                     OkHttpResponseCache.get(request.request, request.cacheValidDuration)
                         ?: throw IOException("Request failed: ${e.message}, and no cache found!")
@@ -147,8 +150,9 @@ object OkHttpClientUtil {
             }
 
             CacheMode.CACHE_ELSE_NETWORK -> {
-                val response =
-                    OkHttpResponseCache.get(request.request, request.cacheValidDuration) ?: executeResponse(request.request)
+                val response = OkHttpResponseCache.get(request.request, request.cacheValidDuration) ?: executeResponse(
+                    request.client, request.request, request.cacheValidDuration
+                )
 
                 response.use {
                     request.onResponse?.invoke(it)
@@ -165,7 +169,7 @@ object OkHttpClientUtil {
     }
 
     @Throws(IOException::class)
-    fun executeResponse(request: Request): Response {
+    fun executeResponse(client: OkHttpClient, request: Request, cacheValidDuration: Long): Response {
         // 发送请求并获取响应对象
         client.newCall(request).execute().use { response ->
             // 如果响应指示需要重定向
@@ -173,12 +177,12 @@ object OkHttpClientUtil {
                 // 获取重定向的位置信息，如果不存在则抛出异常
                 val location = response.header("Location") ?: throw IOException("No location found")
                 // 使用新的URL重新构建请求并执行
-                return executeResponse(request.newBuilder().url(location).build())
+                return executeResponse(client, request.newBuilder().url(location).build(), cacheValidDuration)
             }
             // 如果请求成功
             if (response.isSuccessful) {
                 // 返回响应体的内容，使用指定的字符集进行解析
-                return OkHttpResponseCache.put(request, response)
+                return OkHttpResponseCache.put(request, response, cacheValidDuration)
             } else {
                 // 如果请求失败，根据响应码抛出异常
                 throw IOException("Request failed with code ${response.code}")
@@ -237,7 +241,7 @@ object OkHttpClientUtil {
             }
 
             CacheMode.ONLY_NETWORK -> {
-                enqueueResponse(request.request, onError = {
+                enqueueResponse(request.client, request.request, request.cacheValidDuration, onError = {
                     request.onError?.invoke(it)
                 }, onSucceed = { response ->
                     val converter = request.findConverter(type) as? ResponseConverter<R>
@@ -254,7 +258,7 @@ object OkHttpClientUtil {
             }
 
             CacheMode.NETWORK_ELSE_CACHE -> {
-                enqueueResponse(request.request, onError = { e ->
+                enqueueResponse(request.client, request.request, request.cacheValidDuration, onError = { e ->
                     OkHttpResponseCache.get(request.request, request.cacheValidDuration)?.let {
                         val converter = request.findConverter(type) as? ResponseConverter<R>
                         if (converter == null) {
@@ -300,7 +304,7 @@ object OkHttpClientUtil {
                             request.onError?.invoke(e)
                         }
                     }
-                } ?: enqueueResponse(request.request, onError = {
+                } ?: enqueueResponse(request.client, request.request, request.cacheValidDuration, onError = {
                     request.onError?.invoke(it)
                 }, onSucceed = { response ->
                     val converter = request.findConverter(type) as? ResponseConverter<R>
@@ -319,7 +323,11 @@ object OkHttpClientUtil {
     }
 
     fun enqueueResponse(
-        request: Request, onError: ((e: Exception) -> Unit)? = null, onSucceed: ((response: Response) -> Unit)? = null
+        client: OkHttpClient,
+        request: Request,
+        cacheValidDuration: Long,
+        onError: ((e: Exception) -> Unit)? = null,
+        onSucceed: ((response: Response) -> Unit)? = null
     ) {
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
@@ -333,13 +341,19 @@ object OkHttpClientUtil {
                     if (response.isRedirect) {
                         val location = response.header("Location")
                         if (location?.isNotBlank() == true) {
-                            enqueueResponse(request.newBuilder().url(location).build(), onError, onSucceed)
+                            enqueueResponse(
+                                client,
+                                request.newBuilder().url(location).build(),
+                                cacheValidDuration,
+                                onError,
+                                onSucceed
+                            )
                         } else {
                             onError?.invoke(IOException("Response is redirect but location not found!"))
                         }
                     } else {
                         if (response.isSuccessful) {
-                            onSucceed?.invoke(OkHttpResponseCache.put(request, response))
+                            onSucceed?.invoke(OkHttpResponseCache.put(request, response, cacheValidDuration))
                         } else {
                             onError?.invoke(IOException("Request failed with code ${response.code}"))
                         }
@@ -354,6 +368,7 @@ object OkHttpClientUtil {
         val request = DownloadRequest().apply(config)
         if (request.saveDirectory == null) throw IOException("SaveDirectory is null!")
         return download(
+            request.client,
             request.request,
             request.saveDirectory!!,
             request.filename,
@@ -373,6 +388,7 @@ object OkHttpClientUtil {
     fun download(request: DownloadRequest): File {
         if (request.saveDirectory == null) throw IOException("SaveDirectory is null!")
         return download(
+            request.client,
             request.request,
             request.saveDirectory!!,
             request.filename,
@@ -390,6 +406,7 @@ object OkHttpClientUtil {
 
     @Throws(Exception::class)
     private fun download(
+        client: OkHttpClient,
         request: Request,
         directory: File,
         filename: String? = null,
@@ -437,7 +454,7 @@ object OkHttpClientUtil {
         }
 
         //下载文件使用单独的Client
-        downloadClient.newCall(newRequest).execute().use { response ->
+        client.newCall(newRequest).execute().use { response ->
             if (response.isRedirect) {
                 val location = response.header("Location")
                 if (location?.isNotEmpty() != true) {
@@ -445,6 +462,7 @@ object OkHttpClientUtil {
                 } else {
                     println("redirect to $location")
                     return download(
+                        client,
                         newRequest.newBuilder().url(location).build(),
                         directory,
                         filename,
@@ -562,6 +580,7 @@ object OkHttpClientUtil {
             request.onError?.invoke(IOException("SaveDirectory is null!"))
         } else {
             downloadAsync(
+                request.client,
                 request.request,
                 request.saveDirectory!!,
                 request.filename,
@@ -584,6 +603,7 @@ object OkHttpClientUtil {
             request.onError?.invoke(IOException("SaveDirectory is null!"))
         } else {
             downloadAsync(
+                request.client,
                 request.request,
                 request.saveDirectory!!,
                 request.filename,
@@ -601,6 +621,7 @@ object OkHttpClientUtil {
     }
 
     private fun downloadAsync(
+        client: OkHttpClient,
         request: Request,
         directory: File,
         filename: String? = null,
@@ -663,7 +684,7 @@ object OkHttpClientUtil {
             }
         }
 
-        downloadClient.newCall(newRequest).enqueue(object : Callback {
+        client.newCall(newRequest).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 if (!call.isCanceled()) {
                     onError?.invoke(e)
@@ -677,6 +698,7 @@ object OkHttpClientUtil {
                         if (location?.isNotBlank() == true) {
                             println("redirect to $location")
                             downloadAsync(
+                                client,
                                 newRequest.newBuilder().url(location).build(),
                                 directory,
                                 filename,
@@ -797,14 +819,14 @@ object OkHttpClientUtil {
     }
 
     fun cancel(call: Call) {
-        callManager.cancel(call)
+        CallManager.cancel(call)
     }
 
     fun cancelByTag(tag: Any) {
-        callManager.cancelByTag(tag)
+        CallManager.cancelByTag(tag)
     }
 
     fun cancelAll() {
-        callManager.cancelAll()
+        CallManager.cancelAll()
     }
 }

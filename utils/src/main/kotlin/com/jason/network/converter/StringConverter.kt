@@ -1,5 +1,6 @@
 package com.jason.network.converter
 
+import com.jason.network.error.ConvertException
 import com.jason.network.request.BoxedRequest
 import okhttp3.Response
 import java.nio.charset.Charset

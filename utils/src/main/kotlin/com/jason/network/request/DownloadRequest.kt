@@ -1,6 +1,9 @@
 package com.jason.network.request
 
+import com.jason.network.CallManager
+import com.jason.network.OkHttpClientUtil
 import okhttp3.Headers
+import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import java.io.File
@@ -20,6 +23,15 @@ class DownloadRequest {
     internal var sha1: String = ""
     internal var sha256: String = ""
     internal var onVerifyFile: ((percent: Float, downloadBytes: Long, totalBytes: Long) -> Unit)? = null
+    internal var client = OkHttpClientUtil.downloadClient
+
+    /**
+     * 修改当前Request的OkHttpClient配置, 不会影响全局默认的OkHttpClient
+     */
+    fun setClient(block: OkHttpClient.Builder.() -> Unit): DownloadRequest {
+        client = client.newBuilder().apply(block).apply { CallManager.bind(this) }.build()
+        return this
+    }
 
     val request: Request
         get() {

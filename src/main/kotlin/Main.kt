@@ -1,9 +1,8 @@
 package com.jason.selector
 
-import com.jason.network.CacheMode
+import com.jason.network.cache.CacheMode
 import com.jason.network.OkHttpClientUtil
 import com.jason.network.UrlBuilder
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 

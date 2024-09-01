@@ -1,10 +1,14 @@
 package com.jason.network.request
 
-import com.jason.network.CacheMode
-import com.jason.network.OkHttpResponseCache
+import com.jason.network.cache.CacheMode
+import com.jason.network.CallManager
+import com.jason.network.OkHttpClientUtil
+import com.jason.network.cache.OkHttpResponseCache
 import com.jason.network.UrlBuilder
+import com.jason.network.cache.CacheValidDuration
 import com.jason.network.converter.ResponseConverter
 import okhttp3.Headers
+import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.Response
@@ -19,15 +23,16 @@ class BoxedRequest<R> {
     internal var builder: Request.Builder = Request.Builder()
     internal var converter: ResponseConverter<R>? = null
     private val urlBuilder = UrlBuilder()
+    internal var client = OkHttpClientUtil.client.newBuilder().apply { CallManager.bind(this) }.build()
 
     /**
-     * 缓存时长
-     * NEVER 禁用缓存，无论什么缓存模式都不会写入缓存
-     * FOREVER 永久缓存，不会失效
+     * 修改当前Request的OkHttpClient配置, 不会影响全局默认的OkHttpClient
      */
-    object CacheValidDuration {
-        const val FOREVER = OkHttpResponseCache.VALID_FOREVER
+    fun setClient(block: OkHttpClient.Builder.() -> Unit): BoxedRequest<R> {
+        client = client.newBuilder().apply(block).apply { CallManager.bind(this) }.build()
+        return this
     }
+
 
     fun setCache(mode: CacheMode, duration: Long = CacheValidDuration.FOREVER): BoxedRequest<R> {
         this.cacheMode = mode

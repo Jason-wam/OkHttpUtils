@@ -1,4 +1,4 @@
-package com.jason.network.converter
+package com.jason.network.error
 
 class ConvertException : Exception {
     constructor()

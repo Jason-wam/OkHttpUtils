@@ -8,7 +8,7 @@ import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Proxy
 
-internal class CallManager {
+internal object CallManager {
     private val calls by lazy { HashMap<String, Call>() }
 
     fun cancel(call: Call) {

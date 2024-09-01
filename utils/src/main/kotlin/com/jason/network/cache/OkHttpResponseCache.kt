@@ -1,6 +1,7 @@
-package com.jason.network
+package com.jason.network.cache
 
 import com.jakewharton.disklrucache.DiskLruCache
+import com.jason.network.cacheKey
 import okhttp3.Headers
 import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -19,7 +20,6 @@ import java.io.File
 object OkHttpResponseCache {
     private var cache: DiskLruCache? = null
 
-    const val VALID_FOREVER = -1L
 
     private const val CACHE_KEY_INFO = 0
     private const val CACHE_KEY_BODY = 1
@@ -33,7 +33,8 @@ object OkHttpResponseCache {
         }
     }
 
-    internal fun put(request: Request, response: Response): Response {
+    internal fun put(request: Request, response: Response, validDuration: Long): Response {
+        if (validDuration == 0L) return response
         try {
             cache ?: return response
             cache?.remove(request.cacheKey) //覆盖数据
@@ -50,7 +51,7 @@ object OkHttpResponseCache {
     }
 
     @OptIn(ExperimentalStdlibApi::class)
-    internal fun get(request: Request, validDuration: Long = VALID_FOREVER): Response? {
+    internal fun get(request: Request, validDuration: Long = CacheValidDuration.FOREVER): Response? {
         try {
             cache ?: return null
             val snapshot = cache!!.get(request.cacheKey)
@@ -58,7 +59,7 @@ object OkHttpResponseCache {
             val body = snapshot?.getString(CACHE_KEY_BODY)?.decodeHex()?.toByteArray()
             val time = snapshot?.getString(CACHE_KEY_TIME)?.toLongOrNull() ?: 0
             info ?: return null
-            if (validDuration == VALID_FOREVER || validDuration > System.currentTimeMillis() - time) {
+            if (validDuration == CacheValidDuration.FOREVER || validDuration > System.currentTimeMillis() - time) {
                 val headers = Headers.Builder()
                 val array = info.getJSONArray("responseHeaders")
                 for (i in 0 until array.length()) {

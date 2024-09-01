@@ -1,4 +1,4 @@
-package com.jason.network
+package com.jason.network.cache
 
 enum class CacheMode {
     /**
