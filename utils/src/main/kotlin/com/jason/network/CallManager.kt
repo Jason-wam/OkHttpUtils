@@ -7,76 +7,88 @@ import okhttp3.Protocol
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Proxy
-import java.util.concurrent.CopyOnWriteArrayList
 
 internal object CallManager {
-    private val calls by lazy { CopyOnWriteArrayList<Call>() }
+    private val calls by lazy { ArrayList<Call>() }
 
     fun cancel(call: Call) {
         call.cancel()
-        calls.remove(call)
+        synchronized(calls) {
+            calls.remove(call)
+        }
     }
 
     fun cancelByTag(tag: Any) {
-        val iterator = calls.iterator()
-        while (iterator.hasNext()) {
-            val currentCall = iterator.next()
-            if (currentCall.request().tag() == tag) {
-                currentCall.cancel()
-                iterator.remove()
-            }
+        synchronized(calls) {
+            calls.removeAll(calls.filter { it.request().tag() == tag })
         }
     }
 
     fun cancelAll() {
-        calls.forEach { it.cancel() }
-        calls.clear()
+        synchronized(calls) {
+            calls.forEach { it.cancel() }
+            calls.clear()
+        }
     }
 
     fun bind(client: OkHttpClient.Builder) {
         client.eventListener(object : EventListener() {
             override fun callStart(call: Call) {
                 super.callStart(call)
-                calls.add(call)
                 OkhttpLogger.i("OkHttpClient", "callStart: ${call.request()}")
+                synchronized(calls) {
+                    calls.add(call)
+                }
             }
 
             override fun callFailed(call: Call, ioe: IOException) {
                 super.callFailed(call, ioe)
-                calls.remove(call)
                 OkhttpLogger.e("OkHttpClient", "callFailed: ${call.request()} , reason: $ioe")
+                synchronized(calls) {
+                    calls.remove(call)
+                }
             }
 
             override fun callEnd(call: Call) {
                 super.callEnd(call)
-                calls.remove(call)
                 OkhttpLogger.i("OkHttpClient", "callEnd: ${call.request()}")
+                synchronized(calls) {
+                    calls.remove(call)
+                }
             }
 
             override fun canceled(call: Call) {
                 super.canceled(call)
-                calls.remove(call)
                 OkhttpLogger.i("OkHttpClient", "canceled: ${call.request()}")
+                synchronized(calls) {
+                    calls.remove(call)
+                }
             }
 
             override fun connectFailed(
                 call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy, protocol: Protocol?, ioe: IOException
             ) {
                 super.connectFailed(call, inetSocketAddress, proxy, protocol, ioe)
-                calls.remove(call)
                 OkhttpLogger.e("OkHttpClient", "connectFailed: ${call.request()} , reason: $ioe")
+                synchronized(calls) {
+                    calls.remove(call)
+                }
             }
 
             override fun requestFailed(call: Call, ioe: IOException) {
                 super.requestFailed(call, ioe)
-                calls.remove(call)
                 OkhttpLogger.e("OkHttpClient", "requestFailed: ${call.request()} , reason: $ioe")
+                synchronized(calls) {
+                    calls.remove(call)
+                }
             }
 
             override fun responseFailed(call: Call, ioe: IOException) {
                 super.responseFailed(call, ioe)
-                calls.remove(call)
                 OkhttpLogger.e("OkHttpClient", "responseFailed: ${call.request()} , reason: $ioe")
+                synchronized(calls) {
+                    calls.remove(call)
+                }
             }
         })
     }
