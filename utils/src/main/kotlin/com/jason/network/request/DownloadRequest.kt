@@ -98,24 +98,6 @@ class DownloadRequest {
     }
 
     /**
-     *  同步请求下载时不会执行，直接抛出异常
-     */
-    fun onError(onError: ((e: Exception) -> Unit)): DownloadRequest {
-        this.onError = onError
-        return this
-    }
-
-    fun onSuccess(onSuccess: ((file: File) -> Unit)): DownloadRequest {
-        this.onSuccess = onSuccess
-        return this
-    }
-
-    fun onProgress(onProgress: ((percent: Float, totalCopied: Long, totalSize: Long) -> Unit)): DownloadRequest {
-        this.onProgress = onProgress
-        return this
-    }
-
-    /**
      * 设置校验文件 MD5 值
      *
      * MD5、SHA-1、SHA-256 三种校验方式依次执行，校验顺序为 MD5 -> SHA-1 -> SHA-256
@@ -150,8 +132,26 @@ class DownloadRequest {
      *
      * 如果文件校验不通过则会抛出异常，异步下载则会回调 [onError]
      */
-    fun onVerifyFile(onVerifyFile: ((percent: Float, totalCopied: Long, totalSize: Long) -> Unit)): DownloadRequest {
+    fun onVerifyFile(onVerifyFile: ((percent: Float, verifiedBytes: Long, totalBytes: Long) -> Unit)): DownloadRequest {
         this.onVerifyFile = onVerifyFile
+        return this
+    }
+
+    /**
+     *  同步请求下载时不会执行，直接抛出异常
+     */
+    fun onError(onError: ((e: Exception) -> Unit)): DownloadRequest {
+        this.onError = onError
+        return this
+    }
+
+    fun onSuccess(onSuccess: ((file: File) -> Unit)): DownloadRequest {
+        this.onSuccess = onSuccess
+        return this
+    }
+
+    fun onProgress(onProgress: ((percent: Float, downloadBytes: Long, totalBytes: Long) -> Unit)): DownloadRequest {
+        this.onProgress = onProgress
         return this
     }
 

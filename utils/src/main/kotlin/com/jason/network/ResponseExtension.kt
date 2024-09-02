@@ -21,10 +21,19 @@ fun Response.fileName(defaultName: String = ""): String {
         }
     } else {
         try {
-            URLDecoder.decode(fileName, "UTF8")
-        } catch (e: Exception) {
+            URLDecoder.decode(fileName, "UTF-8")
+        } catch (_: Exception) {
             fileName
         }
     }
     return fileName
 }
+
+fun Response.readString(charset: String = "utf-8"): String? {
+    return body?.source()?.readString(charset(charset))
+}
+
+inline val Response.isFromCache: Boolean
+    get() {
+        return header("Is-From-Cache") == "true"
+    }

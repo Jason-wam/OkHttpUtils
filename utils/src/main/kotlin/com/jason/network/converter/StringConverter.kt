@@ -1,9 +1,10 @@
 package com.jason.network.converter
 
 import com.jason.network.error.ConvertException
+import com.jason.network.readString
 import com.jason.network.request.BoxedRequest
 import okhttp3.Response
-import java.nio.charset.Charset
+import org.json.JSONArray
 import kotlin.reflect.KClass
 
 class StringConverter : ResponseConverter<String>() {
@@ -12,7 +13,8 @@ class StringConverter : ResponseConverter<String>() {
     }
 
     override fun convert(request: BoxedRequest<String>, response: Response): String {
-        return response.body?.source()?.readString(Charset.forName(request.charset))
-            ?: throw ConvertException("Response body is null!")
+        return response.use {
+            it.readString(request.charset) ?: throw ConvertException("Response body is null!")
+        }
     }
 }

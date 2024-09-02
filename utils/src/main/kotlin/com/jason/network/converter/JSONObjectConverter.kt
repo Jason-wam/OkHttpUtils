@@ -1,10 +1,10 @@
 package com.jason.network.converter
 
 import com.jason.network.error.ConvertException
+import com.jason.network.readString
 import com.jason.network.request.BoxedRequest
 import okhttp3.Response
 import org.json.JSONObject
-import java.nio.charset.Charset
 import kotlin.reflect.KClass
 
 class JSONObjectConverter : ResponseConverter<JSONObject>() {
@@ -13,11 +13,13 @@ class JSONObjectConverter : ResponseConverter<JSONObject>() {
     }
 
     override fun convert(
-        request: BoxedRequest<JSONObject>,
-        response: Response
+        request: BoxedRequest<JSONObject>, response: Response
     ): JSONObject {
-        return response.body?.source()?.readString(Charset.forName(request.charset))?.let {
-            JSONObject(it)
-        } ?: throw ConvertException("Response body is null!")
+        return response.use {
+            it.readString(request.charset)?.let {
+                println("json: $it")
+                JSONObject(it)
+            } ?: throw ConvertException("Response body is null!")
+        }
     }
 }

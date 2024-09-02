@@ -3,7 +3,6 @@ package com.jason.network.request
 import com.jason.network.cache.CacheMode
 import com.jason.network.CallManager
 import com.jason.network.OkHttpClientUtil
-import com.jason.network.cache.OkHttpResponseCache
 import com.jason.network.UrlBuilder
 import com.jason.network.cache.CacheValidDuration
 import com.jason.network.converter.ResponseConverter
@@ -24,6 +23,7 @@ class BoxedRequest<R> {
     internal var converter: ResponseConverter<R>? = null
     private val urlBuilder = UrlBuilder()
     internal var client = OkHttpClientUtil.client.newBuilder().apply { CallManager.bind(this) }.build()
+    internal var standAloneCacheKay: String? = null
 
     /**
      * 修改当前Request的OkHttpClient配置, 不会影响全局默认的OkHttpClient
@@ -32,7 +32,6 @@ class BoxedRequest<R> {
         client = client.newBuilder().apply(block).apply { CallManager.bind(this) }.build()
         return this
     }
-
 
     fun setCache(mode: CacheMode, duration: Long = CacheValidDuration.FOREVER): BoxedRequest<R> {
         this.cacheMode = mode
@@ -130,17 +129,33 @@ class BoxedRequest<R> {
         return this
     }
 
+    fun setCacheMode(cacheMode: CacheMode): BoxedRequest<R> {
+        this.cacheMode = cacheMode
+        return this
+    }
+
+    /**
+     * 设置缓存Key，默认为 url + method + headers
+     *
+     * 通常情况下无需设置此参数，但在某些情况下，例如：
+     *
+     * 1. 如果Method为 POST，则可能根据需要追加使用 body 的 唯一标识
+     *
+     * 2. 请求的url为动态的，例如：url为：/api/info/{id}，id为动态参数，
+     *    此时，默认缓存Key无法满足需求，此时，需要考虑手动设置缓存Key
+     *
+     */
+    fun setCacheKey(key: String): BoxedRequest<R> {
+        this.standAloneCacheKay = key
+        return this
+    }
+
     /**
      * 设置缓存时长
      * @param duration 单位：毫秒
      */
     fun setCacheValidDuration(duration: Long): BoxedRequest<R> {
         this.cacheValidDuration = duration
-        return this
-    }
-
-    fun setCacheMode(cacheMode: CacheMode): BoxedRequest<R> {
-        this.cacheMode = cacheMode
         return this
     }
 

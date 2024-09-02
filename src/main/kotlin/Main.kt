@@ -3,18 +3,37 @@ package com.jason.selector
 import com.jason.network.cache.CacheMode
 import com.jason.network.OkHttpClientUtil
 import com.jason.network.UrlBuilder
+import com.jason.network.cache.CacheValidDuration
+import com.jason.network.isFromCache
+import okhttp3.Response
 import org.json.JSONObject
 import java.io.File
 
 fun main() {
     OkHttpClientUtil.setCacheDir(File("D:/OKHttpCache"))
 
-    println(
-        UrlBuilder().host("https://api.bilibili.com/").path("x/click-interface/click/now").param("from","Android").build()
-    )
+    enqueue()
 
-    enqueue2()
+}
 
+fun enqueue() {
+    OkHttpClientUtil.execute<Response> {
+        url("http://192.168.0.8:2333/BitComet.7z")
+        setCacheMode(CacheMode.CACHE_ELSE_NETWORK)
+        setCacheValidDuration(CacheValidDuration.FOREVER)
+        onResponse {
+            println()
+            println("onResponse > 是否是缓存：${it.isFromCache}, size = ${it.body?.contentLength()}")
+        }
+        onError {
+            println()
+            println("onError： ${it.message}")
+        }
+        onSuccess {
+            println()
+            println("onSuccess：\n${it.headers}")
+        }
+    }
 }
 
 fun download() {
@@ -92,7 +111,12 @@ fun enqueue2() {
         url("https://api.bilibili.com/")
         param("from", "Android")
         path("x/click-interface/click/now")
-        setCacheMode(CacheMode.NETWORK_ELSE_CACHE)
+        setCacheMode(CacheMode.ONLY_NETWORK)
+        onResponse {
+            println("onResponse > 是否是缓存：${it.isFromCache} ${it.body?.contentType()}")
+            //此处不得然使用it.body?.string()，因为此时消费了it.body会导致onSuccess失败
+            //println("onResponse > 是否是缓存：${it.isFromCache}, string = ${it.body?.string()}")
+        }
         onError {
             println("请求失败： ${it.stackTraceToString()}")
         }

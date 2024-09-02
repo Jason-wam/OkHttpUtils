@@ -72,19 +72,19 @@ fun InputStream.copyTo(
     return bytesCopied
 }
 
-fun InputStream.sumMd5(
+fun InputStream.md5(
     contentLength: Long = -1, progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
 ): String {
     return sum(MessageDigest.getInstance("MD5"), contentLength, progress)
 }
 
-fun InputStream.sumSha1(
+fun InputStream.sha1(
     contentLength: Long = -1, progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
 ): String {
     return sum(MessageDigest.getInstance("SHA-1"), contentLength, progress)
 }
 
-fun InputStream.sumSha256(
+fun InputStream.sha256(
     contentLength: Long = -1, progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
 ): String {
     return sum(MessageDigest.getInstance("SHA-256"), contentLength, progress)
@@ -142,14 +142,14 @@ fun FileInputStream.sum(
     return checksum.padStart(32, '0')
 }
 
-fun FileInputStream.sumMd5(progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null): String {
+fun FileInputStream.md5(progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null): String {
     return sum(MessageDigest.getInstance("MD5"), progress)
 }
 
-fun FileInputStream.sumSha1(progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null): String {
+fun FileInputStream.sha1(progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null): String {
     return sum(MessageDigest.getInstance("SHA-1"), progress)
 }
 
-fun FileInputStream.sumSha256(progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null): String {
+fun FileInputStream.sha256(progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null): String {
     return sum(MessageDigest.getInstance("SHA-256"), progress)
 }
