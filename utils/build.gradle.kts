@@ -29,10 +29,10 @@ java {
     targetCompatibility = JavaVersion.VERSION_1_8
 }
 
-val libVersion = "1.2.5"
+val libVersion = "1.0.1"
 
 tasks.withType<Jar> {
-    archiveBaseName.set("selector") // 设置构件的基本名称
+    archiveBaseName.set("OkHttpUtils") // 设置构件的基本名称
     archiveVersion.set(libVersion) // 设置构件的版本
 }
 
@@ -57,7 +57,7 @@ afterEvaluate {
             create<MavenPublication>("mavenJava") {
                 from(components["java"])
                 groupId = "com.jason"
-                artifactId = "network"
+                artifactId = "okhttp-utils"
                 version = libVersion
                 System.out.println("implementation(\"$groupId:$artifactId:$version\")")
             }

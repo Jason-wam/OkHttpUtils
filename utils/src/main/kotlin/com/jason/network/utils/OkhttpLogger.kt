@@ -1,4 +1,4 @@
-package com.jason.network
+package com.jason.network.utils
 
 object OkhttpLogger {
     var enabled = true

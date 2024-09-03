@@ -1,7 +1,7 @@
 package com.jason.network.cache
 
 import com.jakewharton.disklrucache.DiskLruCache
-import com.jason.network.cacheKey
+import com.jason.network.extension.cacheKey
 import okhttp3.Headers
 import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -10,14 +10,12 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody
 import okhttp3.internal.closeQuietly
-import okhttp3.internal.http.promisesBody
 import okio.BufferedSource
 import okio.buffer
 import okio.source
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.io.InputStream
 
 internal object OkHttpResponseCache {
     private var cache: DiskLruCache? = null
@@ -54,7 +52,6 @@ internal object OkHttpResponseCache {
                 if (body.source().inputStream().copyTo(outputStream) > 0) {
                     outputStream.closeQuietly()
                     editor.commit()
-                    println("put cache: $key")
                     return response.newBuilder().let {
                         val snapshot = cache?.get(key)
                         if (snapshot != null) {
@@ -88,7 +85,6 @@ internal object OkHttpResponseCache {
             val info = snapshot.getString(CACHE_KEY_INFO)?.let { JSONObject(it) } ?: return null
             val time = snapshot.getString(CACHE_KEY_TIME)?.toLongOrNull() ?: 0
             if (validDuration == CacheValidDuration.FOREVER || validDuration > System.currentTimeMillis() - time) {
-                println("valid cache: $key found!")
                 val headers = Headers.Builder()
                 val array = info.getJSONArray("responseHeaders")
                 for (i in 0 until array.length()) {
@@ -116,8 +112,6 @@ internal object OkHttpResponseCache {
                     it.build()
                 }
             }
-
-            println("cache: $key not found!")
             return null
         } catch (e: Exception) {
             e.printStackTrace()

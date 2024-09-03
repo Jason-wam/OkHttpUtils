@@ -1,4 +1,4 @@
-package com.jason.network
+package com.jason.network.utils
 
 import java.security.SecureRandom
 import java.security.cert.X509Certificate

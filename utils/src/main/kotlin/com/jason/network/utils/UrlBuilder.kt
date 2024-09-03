@@ -1,4 +1,4 @@
-package com.jason.network
+package com.jason.network.utils
 
 import java.net.MalformedURLException
 import java.net.URL
@@ -17,6 +17,11 @@ class UrlBuilder {
 
     fun charset(charset: String): UrlBuilder {
         this.charset = charset
+        if (params.isNotEmpty()) {
+            val newMap = HashMap<String, String>()
+            this.params.forEach { newMap[it.key] = it.value.encode(charset) }
+            this.params = newMap
+        }
         return this
     }
 

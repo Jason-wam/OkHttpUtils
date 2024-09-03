@@ -1,4 +1,4 @@
-package com.jason.network
+package com.jason.network.extension
 
 import java.io.FileInputStream
 import java.io.InputStream

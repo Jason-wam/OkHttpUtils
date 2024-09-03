@@ -1,37 +1,18 @@
 package com.jason.network.request
 
 import com.jason.network.cache.CacheMode
-import com.jason.network.CallManager
-import com.jason.network.OkHttpClientUtil
-import com.jason.network.UrlBuilder
 import com.jason.network.cache.CacheValidDuration
 import com.jason.network.converter.ResponseConverter
-import okhttp3.Headers
-import okhttp3.OkHttpClient
-import okhttp3.Request
+import com.jason.network.utils.UrlBuilder
 import okhttp3.RequestBody
-import okhttp3.Response
 
-class BoxedRequest<R> {
-    var charset: String = "utf-8"
-    var cacheValidDuration: Long = CacheValidDuration.FOREVER
-    var cacheMode: CacheMode = CacheMode.ONLY_NETWORK
-    internal var onError: ((e: Exception) -> Unit)? = null
-    internal var onSuccess: ((body: R) -> Unit)? = null
-    internal var onResponse: ((response: Response) -> Unit)? = null
-    internal var builder: Request.Builder = Request.Builder()
+@Suppress("unused")
+class BoxedRequest<R> : BaseRequest<R>() {
+    internal var cacheMode: CacheMode = CacheMode.ONLY_NETWORK
+    internal var cacheValidDuration: Long = CacheValidDuration.FOREVER
     internal var converter: ResponseConverter<R>? = null
-    private val urlBuilder = UrlBuilder()
-    internal var client = OkHttpClientUtil.client.newBuilder().apply { CallManager.bind(this) }.build()
     internal var standAloneCacheKay: String? = null
-
-    /**
-     * 修改当前Request的OkHttpClient配置, 不会影响全局默认的OkHttpClient
-     */
-    fun setClient(block: OkHttpClient.Builder.() -> Unit): BoxedRequest<R> {
-        client = client.newBuilder().apply(block).apply { CallManager.bind(this) }.build()
-        return this
-    }
+    private val urlBuilder = UrlBuilder()
 
     fun setCache(mode: CacheMode, duration: Long = CacheValidDuration.FOREVER): BoxedRequest<R> {
         this.cacheMode = mode
@@ -39,99 +20,32 @@ class BoxedRequest<R> {
         return this
     }
 
-    val request: Request
-        get() {
-            return builder.build()
-        }
-
-    val url: String
-        get() {
-            return request.url.toString()
-        }
-
-    fun url(url: String): BoxedRequest<R> {
-        urlBuilder.host(url)
-        builder.url(urlBuilder.build())
-        return this
-    }
-
-    fun path(path: String): BoxedRequest<R> {
-        urlBuilder.path(path)
-        builder.url(urlBuilder.build())
-        return this
-    }
-
-    fun param(key: String, value: Any): BoxedRequest<R> {
-        urlBuilder.param(key, value)
-        builder.url(urlBuilder.build())
-        return this
-    }
-
-    fun headers(headers: Headers): BoxedRequest<R> {
-        builder.headers(headers)
-        return this
-    }
-
-    fun header(name: String, value: String): BoxedRequest<R> {
-        builder.header(name, value)
-        return this
-    }
-
-    fun addHeader(name: String, value: String): BoxedRequest<R> {
-        builder.addHeader(name, value)
-        return this
-    }
-
-    fun tag(tag: Any): BoxedRequest<R> {
-        builder.tag(tag)
-        return this
-    }
-
-    fun post(body: RequestBody): BoxedRequest<R> {
+    fun post(body: RequestBody) {
         builder.post(body)
-        return this
     }
 
-    fun put(body: RequestBody): BoxedRequest<R> {
+    fun put(body: RequestBody) {
         builder.put(body)
-        return this
     }
 
-    fun delete(body: RequestBody?): BoxedRequest<R> {
+    fun delete(body: RequestBody?) {
         builder.delete(body)
-        return this
     }
 
-    fun patch(body: RequestBody): BoxedRequest<R> {
+    fun patch(body: RequestBody) {
         builder.patch(body)
-        return this
     }
 
-    fun get(): BoxedRequest<R> {
+    fun get() {
         builder.get()
-        return this
     }
 
-    fun head(): BoxedRequest<R> {
+    fun head() {
         builder.head()
-        return this
     }
 
-
-    fun setBaseRequest(config: Request.Builder.() -> Unit): BoxedRequest<R> {
-        builder.apply(config)
-        return this
-    }
-
-    fun setCharset(charset: String): BoxedRequest<R> {
-        this.charset = charset
-        this.urlBuilder.charset(charset)
-        return this
-    }
-
-    fun setCacheMode(cacheMode: CacheMode): BoxedRequest<R> {
+    fun setCacheMode(cacheMode: CacheMode) {
         this.cacheMode = cacheMode
-        return this
     }
 
     /**
@@ -145,43 +59,19 @@ class BoxedRequest<R> {
      *    此时，默认缓存Key无法满足需求，此时，需要考虑手动设置缓存Key
      *
      */
-    fun setCacheKey(key: String): BoxedRequest<R> {
+    fun setCacheKey(key: String) {
         this.standAloneCacheKay = key
-        return this
     }
 
     /**
      * 设置缓存时长
      * @param duration 单位：毫秒
      */
-    fun setCacheValidDuration(duration: Long): BoxedRequest<R> {
+    fun setCacheValidDuration(duration: Long) {
         this.cacheValidDuration = duration
-        return this
     }
 
-    fun setConverter(converter: ResponseConverter<R>): BoxedRequest<R> {
+    fun setConverter(converter: ResponseConverter<R>) {
         this.converter = converter
-        return this
-    }
-
-    /**
-     *  同步请求下载时不会执行，直接抛出异常
-     */
-    fun onError(onError: ((e: Exception) -> Unit)): BoxedRequest<R> {
-        this.onError = onError
-        return this
-    }
-
-    fun onSuccess(onSuccess: ((body: R) -> Unit)): BoxedRequest<R> {
-        this.onSuccess = onSuccess
-        return this
-    }
-
-    /**
-     * 在 [onError] 或 [onSuccess] 前回调 Response
-     */
-    fun onResponse(onResponse: ((response: Response) -> Unit)): BoxedRequest<R> {
-        this.onResponse = onResponse
-        return this
     }
 }

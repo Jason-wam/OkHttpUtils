@@ -1,4 +1,4 @@
-package com.jason.network
+package com.jason.network.extension
 
 import okhttp3.OkHttpClient
 import java.io.InputStream

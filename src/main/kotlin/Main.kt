@@ -2,9 +2,8 @@ package com.jason.selector
 
 import com.jason.network.cache.CacheMode
 import com.jason.network.OkHttpClientUtil
-import com.jason.network.UrlBuilder
 import com.jason.network.cache.CacheValidDuration
-import com.jason.network.isFromCache
+import com.jason.network.extension.isFromCache
 import okhttp3.Response
 import org.json.JSONObject
 import java.io.File
@@ -12,14 +11,13 @@ import java.io.File
 fun main() {
     OkHttpClientUtil.setCacheDir(File("D:/OKHttpCache"))
 
-    enqueue()
-
+    post()
 }
 
 fun enqueue() {
-    OkHttpClientUtil.execute<Response> {
-        url("http://192.168.0.8:2333/BitComet.7z")
-        setCacheMode(CacheMode.CACHE_ELSE_NETWORK)
+    OkHttpClientUtil.enqueue<Response> {
+        url("https://i1.hdslb.com/bfs/banner/c5595aaa09c1710ba3e32651aab84104d6171b2b.png")
+        setCacheMode(CacheMode.NETWORK_ELSE_CACHE)
         setCacheValidDuration(CacheValidDuration.FOREVER)
         onResponse {
             println()
@@ -36,15 +34,37 @@ fun enqueue() {
     }
 }
 
+fun post() {
+    OkHttpClientUtil.upload<String> {
+        url("http://192.168.0.4:8096/test")
+        //这里的Param为添加表单数据，而不是追加url参数
+        param("from", "Android")
+        param("file", File("D:\\GPT-SoVITS-v2-240821.7z"))
+        onResponse {
+            println()
+            println("onResponse > ${it.body?.contentType()}")
+        }
+        onError {
+            println("请求失败： ${it.stackTraceToString()}")
+        }
+        onProgress { percent: Float, uploadedBytes: Long, totalBytes: Long ->
+            print("\r上传进度： $percent")
+        }
+        onSuccess {
+            println("请求成功： \n${it}")
+        }
+    }
+}
+
 fun download() {
     //异步请求
     OkHttpClientUtil.downloadAsync {
         //shasum -a 256 = 8762f7e74e4d64d72fceb5f70682e6b069932deedb4949c6975d0f0fe0a91be3
-        url("https://releases.ubuntu.com/24.04/ubuntu-24.04-live-server-amd64.iso")
+        url("https://releases.ubuntu.com/24.04/ubuntu-24.04.1-desktop-amd64.iso")
         setSaveDirectory(File("D:/"))
-        setFileName("ubuntu-24.04-live-server-amd64.iso")
+        setFileName("ubuntu-24.04.1-desktop-amd64.iso")
         enableRangeDownload(true)
-        setSHA256("8762f7e74e4d64d72fceb5f70682e6b069932deedb4949c6975d0f0fe0a91be3")
+        setSHA256("c2e6f4dc37ac944e2ed507f87c6188dd4d3179bf4a3f9e110d3c88d1f3294bdc")
 
         onVerifyFile { percent, totalCopied, totalSize ->
             print("\r校验文件： $percent , $totalCopied/$totalSize")
@@ -61,7 +81,7 @@ fun download() {
             println("下载成功： $it")
         }
 
-        onProgress { percent,downloadBytes,totalBytes ->
+        onProgress { percent, downloadBytes, totalBytes ->
             print("\r下载进度： $percent , $downloadBytes/$totalBytes")
         }
     }
@@ -114,8 +134,9 @@ fun enqueue2() {
         setCacheMode(CacheMode.ONLY_NETWORK)
         onResponse {
             println("onResponse > 是否是缓存：${it.isFromCache} ${it.body?.contentType()}")
-            //此处不得然使用it.body?.string()，因为此时消费了it.body会导致onSuccess失败
-            //println("onResponse > 是否是缓存：${it.isFromCache}, string = ${it.body?.string()}")
+
+            //此处不得使用it.body?.string()，因为此时消费了it.body会导致onSuccess失败
+            //println("onResponse > 是否是缓存：${it.isFromCache}, string = ${it.body?.source()?.peek()?.readString(Charsets.UTF_8)}")
         }
         onError {
             println("请求失败： ${it.stackTraceToString()}")

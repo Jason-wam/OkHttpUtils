@@ -4,12 +4,21 @@ import com.jason.network.cache.CacheMode
 import com.jason.network.cache.OkHttpResponseCache
 import com.jason.network.converter.JSONArrayConverter
 import com.jason.network.converter.JSONObjectConverter
-import com.jason.network.converter.ResponseConverter
 import com.jason.network.converter.NoConverter
+import com.jason.network.converter.ResponseConverter
 import com.jason.network.converter.StringConverter
 import com.jason.network.error.FileVerificationException
+import com.jason.network.extension.copyTo
+import com.jason.network.extension.fileName
+import com.jason.network.extension.trustSSLCertificate
+import com.jason.network.extension.verifyMD5
+import com.jason.network.extension.verifySHA1
+import com.jason.network.extension.verifyShA256
 import com.jason.network.request.BoxedRequest
 import com.jason.network.request.DownloadRequest
+import com.jason.network.request.UploadRequest
+import com.jason.network.utils.CallManager
+import com.jason.network.utils.OkhttpLogger
 import okhttp3.*
 import okio.use
 import java.io.File
@@ -19,6 +28,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import kotlin.reflect.KClass
 
+@Suppress("unused")
 object OkHttpClientUtil {
     var client: OkHttpClient = OkHttpClient.Builder().apply {
         trustSSLCertificate()
@@ -36,7 +46,7 @@ object OkHttpClientUtil {
         CallManager.bind(this)
     }.build()
 
-    val downloadClient by lazy {
+    val longClient by lazy {
         client.newBuilder().apply {
             callTimeout(10, TimeUnit.DAYS)
             connectTimeout(10, TimeUnit.DAYS)
@@ -74,6 +84,18 @@ object OkHttpClientUtil {
         return builder.build()
     }
 
+    fun addConverter(converter: ResponseConverter<*>) {
+        // 移除相同类型的转换器
+        converters.removeAll { it.supportType() == converter.supportType() }
+        converters.add(converter)
+    }
+
+    private fun findConverter(type: KClass<*>): ResponseConverter<*>? {
+        return converters.find {
+            it.supportType() == type
+        }
+    }
+
     /**
      * 执行同步请求
      * 此函数通过高阶函数参数接收请求配置，允许在执行前动态指定请求的各种参数
@@ -86,16 +108,6 @@ object OkHttpClientUtil {
     @Throws(Exception::class)
     inline fun <reified R> execute(config: BoxedRequest<R>.() -> Unit): R {
         return execute(BoxedRequest<R>().apply(config), R::class)
-    }
-
-    fun addConverter(converter: ResponseConverter<*>) {
-        converters.add(converter)
-    }
-
-    private fun BoxedRequest<*>.findConverter(type: KClass<*>): ResponseConverter<*>? {
-        return converter ?: converters.find {
-            it.supportType() == type
-        }
     }
 
     /**
@@ -112,7 +124,7 @@ object OkHttpClientUtil {
             CacheMode.ONLY_CACHE -> {
                 OkHttpResponseCache.get(request.standAloneCacheKay, request.request, request.cacheValidDuration)?.let {
                     request.onResponse?.invoke(it)
-                    val converter = request.findConverter(type) as? ResponseConverter<R>
+                    val converter = request.converter ?: findConverter(type) as? ResponseConverter<R>
                     if (converter == null) {
                         throw Exception("Converter not found for $type")
                     }
@@ -121,9 +133,11 @@ object OkHttpClientUtil {
             }
 
             CacheMode.ONLY_NETWORK -> {
-                executeResponse(request.client, request.standAloneCacheKay, request.request, request.cacheValidDuration).use {
+                executeResponse(
+                    request.client, request.standAloneCacheKay, request.request, request.cacheValidDuration
+                ).use {
                     request.onResponse?.invoke(it)
-                    val converter = request.findConverter(type) as? ResponseConverter<R>
+                    val converter = request.converter ?: findConverter(type) as? ResponseConverter<R>
                     if (converter == null) {
                         throw Exception("Converter not found for $type")
                     }
@@ -135,14 +149,16 @@ object OkHttpClientUtil {
 
             CacheMode.NETWORK_ELSE_CACHE -> {
                 val response = try {
-                    executeResponse(request.client, request.standAloneCacheKay, request.request, request.cacheValidDuration)
+                    executeResponse(
+                        request.client, request.standAloneCacheKay, request.request, request.cacheValidDuration
+                    )
                 } catch (e: Exception) {
                     OkHttpResponseCache.get(request.standAloneCacheKay, request.request, request.cacheValidDuration)
                         ?: throw IOException("Request failed: ${e.message}, and no cache found!")
                 }
                 response.use {
                     request.onResponse?.invoke(it)
-                    val converter = request.findConverter(type) as? ResponseConverter<R>
+                    val converter = request.converter ?: findConverter(type) as? ResponseConverter<R>
                     if (converter == null) {
                         throw Exception("Converter not found for $type")
                     }
@@ -153,14 +169,15 @@ object OkHttpClientUtil {
             }
 
             CacheMode.CACHE_ELSE_NETWORK -> {
-                val response = OkHttpResponseCache.get(request.standAloneCacheKay, request.request, request.cacheValidDuration)
-                    ?: executeResponse(
-                        request.client, request.standAloneCacheKay, request.request, request.cacheValidDuration
-                    )
+                val response =
+                    OkHttpResponseCache.get(request.standAloneCacheKay, request.request, request.cacheValidDuration)
+                        ?: executeResponse(
+                            request.client, request.standAloneCacheKay, request.request, request.cacheValidDuration
+                        )
 
                 response.use {
                     request.onResponse?.invoke(it)
-                    val converter = request.findConverter(type) as? ResponseConverter<R>
+                    val converter = request.converter ?: findConverter(type) as? ResponseConverter<R>
                     if (converter == null) {
                         throw Exception("Converter not found for $type")
                     }
@@ -173,7 +190,7 @@ object OkHttpClientUtil {
     }
 
     @Throws(IOException::class)
-    fun executeResponse(
+    private fun executeResponse(
         client: OkHttpClient, cacheKey: String? = null, request: Request, cacheValidDuration: Long
     ): Response {
         // 发送请求并获取响应对象
@@ -234,7 +251,7 @@ object OkHttpClientUtil {
                     OkHttpResponseCache.get(request.standAloneCacheKay, request.request, request.cacheValidDuration)
                         ?.let { response ->
                             request.onResponse?.invoke(response)
-                            val converter = request.findConverter(type) as? ResponseConverter<R>
+                            val converter = request.converter ?: findConverter(type) as? ResponseConverter<R>
                             if (converter == null) {
                                 request.onError?.invoke(IOException("Converter not found for $type"))
                             } else {
@@ -255,9 +272,9 @@ object OkHttpClientUtil {
                         onError = {
                             request.onError?.invoke(it)
                         },
-                        onSucceed = { response ->
+                        onSuccess = { response ->
                             request.onResponse?.invoke(response)
-                            val converter = request.findConverter(type) as? ResponseConverter<R>
+                            val converter = request.converter ?: findConverter(type) as? ResponseConverter<R>
                             if (converter == null) {
                                 request.onError?.invoke(IOException("Converter not found for $type"))
                             } else {
@@ -276,29 +293,30 @@ object OkHttpClientUtil {
                         request.request,
                         request.cacheValidDuration,
                         onError = { e ->
-                            OkHttpResponseCache.get(request.standAloneCacheKay, request.request, request.cacheValidDuration)
-                                ?.let { response ->
-                                    request.onResponse?.invoke(response)
-                                    val converter = request.findConverter(type) as? ResponseConverter<R>
-                                    if (converter == null) {
-                                        request.onError?.invoke(IOException("Converter not found for $type"))
-                                    } else {
-                                        try {
-                                            request.onSuccess?.invoke(converter.convert(request, response))
-                                        } catch (e: Exception) {
-                                            request.onError?.invoke(e)
-                                        }
+                            OkHttpResponseCache.get(
+                                request.standAloneCacheKay, request.request, request.cacheValidDuration
+                            )?.let { response ->
+                                request.onResponse?.invoke(response)
+                                val converter = request.converter ?: findConverter(type) as? ResponseConverter<R>
+                                if (converter == null) {
+                                    request.onError?.invoke(IOException("Converter not found for $type"))
+                                } else {
+                                    try {
+                                        request.onSuccess?.invoke(converter.convert(request, response))
+                                    } catch (e: Exception) {
+                                        request.onError?.invoke(e)
                                     }
-                                } ?: let {
+                                }
+                            } ?: let {
                                 request.onError?.invoke(IOException(buildString {
                                     append(e.message)
                                     append(" and no cache found!")
                                 }))
                             }
                         },
-                        onSucceed = { response ->
+                        onSuccess = { response ->
                             request.onResponse?.invoke(response)
-                            val converter = request.findConverter(type) as? ResponseConverter<R>
+                            val converter = request.converter ?: findConverter(type) as? ResponseConverter<R>
                             if (converter == null) {
                                 request.onError?.invoke(IOException("Converter not found for $type"))
                             } else {
@@ -315,7 +333,7 @@ object OkHttpClientUtil {
                     OkHttpResponseCache.get(request.standAloneCacheKay, request.request, request.cacheValidDuration)
                         ?.let { response ->
                             request.onResponse?.invoke(response)
-                            val converter = request.findConverter(type) as? ResponseConverter<R>
+                            val converter = request.converter ?: findConverter(type) as? ResponseConverter<R>
                             if (converter == null) {
                                 request.onError?.invoke(IOException("Converter not found for $type"))
                             } else {
@@ -332,9 +350,9 @@ object OkHttpClientUtil {
                         onError = {
                             request.onError?.invoke(it)
                         },
-                        onSucceed = { response ->
+                        onSuccess = { response ->
                             request.onResponse?.invoke(response)
-                            val converter = request.findConverter(type) as? ResponseConverter<R>
+                            val converter = request.converter ?: findConverter(type) as? ResponseConverter<R>
                             if (converter == null) {
                                 request.onError?.invoke(IOException("Converter not found for $type"))
                             } else {
@@ -350,13 +368,13 @@ object OkHttpClientUtil {
         }
     }
 
-    fun enqueueResponse(
+    private fun enqueueResponse(
         client: OkHttpClient,
         cacheKey: String?,
         request: Request,
         cacheValidDuration: Long,
         onError: ((e: Exception) -> Unit)? = null,
-        onSucceed: ((response: Response) -> Unit)? = null
+        onSuccess: ((response: Response) -> Unit)? = null
     ) {
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
@@ -378,12 +396,12 @@ object OkHttpClientUtil {
                                 request.newBuilder().url(location).build(),
                                 cacheValidDuration,
                                 onError,
-                                onSucceed
+                                onSuccess
                             )
                         }
                     } else {
                         if (response.isSuccessful) {
-                            onSucceed?.invoke(OkHttpResponseCache.put(cacheKey, request, response, cacheValidDuration))
+                            onSuccess?.invoke(OkHttpResponseCache.put(cacheKey, request, response, cacheValidDuration))
                         } else {
                             onError?.invoke(IOException("Request failed with code ${response.code}"))
                         }
@@ -663,7 +681,7 @@ object OkHttpClientUtil {
         onVerifyFile: ((percent: Float, totalCopied: Long, totalSize: Long) -> Unit)? = null,
         onError: ((e: Exception) -> Unit)? = null,
         onProgress: ((percent: Float, downloadBytes: Long, totalBytes: Long) -> Unit)? = null,
-        onSucceed: ((file: File) -> Unit)? = null
+        onSuccess: ((file: File) -> Unit)? = null
     ) {
         var newRequest = request
         if (rangeDownload && filename != null) {
@@ -681,33 +699,27 @@ object OkHttpClientUtil {
         fun verifyFile(file: File) {
             try {
                 if (md5.isNotEmpty()) {
-                    if (file.verifyMD5(md5, onVerifyFile)) {
-                        onSucceed?.invoke(file)
-                    } else {
+                    if (!file.verifyMD5(md5, onVerifyFile)) {
                         onError?.invoke(FileVerificationException("File MD5 verification failed!"))
+                        return
                     }
-                    return
                 }
 
                 if (sha1.isNotEmpty()) {
-                    if (file.verifySHA1(sha1, onVerifyFile)) {
-                        onSucceed?.invoke(file)
-                    } else {
+                    if (!file.verifySHA1(sha1, onVerifyFile)) {
                         onError?.invoke(FileVerificationException("File SHA-1 verification failed!"))
+                        return
                     }
-                    return
                 }
 
                 if (sha256.isNotEmpty()) {
-                    if (file.verifyShA256(sha256, onVerifyFile)) {
-                        onSucceed?.invoke(file)
-                    } else {
+                    if (!file.verifyShA256(sha256, onVerifyFile)) {
                         onError?.invoke(FileVerificationException("File SHA-256 verification failed!"))
+                        return
                     }
-                    return
                 }
 
-                onSucceed?.invoke(file)
+                onSuccess?.invoke(file)
             } catch (e: Exception) {
                 e.printStackTrace()
                 onError?.invoke(e)
@@ -740,7 +752,7 @@ object OkHttpClientUtil {
                                 onVerifyFile,
                                 onError,
                                 onProgress,
-                                onSucceed
+                                onSuccess
                             )
                         }
                     } else {
@@ -842,6 +854,104 @@ object OkHttpClientUtil {
                                 onError?.invoke(e)
                             }
                         }
+                    }
+                }
+            }
+        })
+    }
+
+    @Throws(Exception::class)
+    inline fun <reified R> upload(config: UploadRequest<R>.() -> Unit): R {
+        return upload(UploadRequest<R>().apply(config), R::class)
+    }
+
+    @Throws(Exception::class)
+    @Suppress("UNCHECKED_CAST")
+    fun <R> upload(request: UploadRequest<R>, type: KClass<*>): R {
+        return uploadForResponse(request.client, request.request).use { //这里使用 use 后，会自动关闭流
+            request.onResponse?.invoke(it)
+
+            val converter = request.converter ?: findConverter(type) as? ResponseConverter<R>
+            if (converter == null) {
+                throw Exception("Converter not found for $type")
+            }
+            converter.convert(request, it)
+        }.also {
+            request.onSuccess?.invoke(it)
+        }
+    }
+
+    @Throws(IOException::class)
+    private fun uploadForResponse(
+        client: OkHttpClient, request: Request
+    ): Response {
+        // 发送请求并获取响应对象
+        client.newCall(request).execute().let { response -> //这里使用 let 后，防止自动关闭流导致Closed
+            // 如果响应指示需要重定向
+            if (response.isRedirect) {
+                // 获取重定向的位置信息，如果不存在则抛出异常
+                val location = response.header("Location") ?: throw IOException("No location found")
+                // 使用新的URL重新构建请求并执行
+                return uploadForResponse(client, request.newBuilder().url(location).build())
+            }
+            // 如果请求成功
+            if (response.isSuccessful) {
+                // 返回响应体的内容，使用指定的字符集进行解析
+                return response
+            } else {
+                // 如果请求失败，根据响应码抛出异常
+                throw IOException("Request failed with code ${response.code}")
+            }
+        }
+    }
+
+    inline fun <reified R> uploadAsync(request: UploadRequest<R>.() -> Unit) {
+        uploadAsync(UploadRequest<R>().apply(request), R::class)
+    }
+
+    inline fun <reified R> uploadAsync(request: UploadRequest<R>) {
+        uploadAsync(request, R::class)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    fun <R> uploadAsync(request: UploadRequest<R>, type: KClass<*>) {
+        uploadAsyncForResponse(request.client, request.request, onError = {
+            request.onError?.invoke(it)
+        }, onSuccess = { response ->
+            request.onResponse?.invoke(response)
+            val converter = request.converter ?: findConverter(type) as? ResponseConverter<R>
+            if (converter == null) {
+                request.onError?.invoke(IOException("Converter not found for $type"))
+            } else {
+                try {
+                    request.onSuccess?.invoke(converter.convert(request, response))
+                } catch (e: Exception) {
+                    request.onError?.invoke(e)
+                }
+            }
+        })
+    }
+
+    private fun uploadAsyncForResponse(
+        client: OkHttpClient, request: Request, onError: ((Exception) -> Unit)?, onSuccess: ((Response) -> Unit)?
+    ) {
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                onError?.invoke(e)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                if (response.isRedirect) {
+                    // 获取重定向的位置信息，如果不存在则抛出异常
+                    val location = response.header("Location") ?: throw IOException("No location found")
+                    // 使用新的URL重新构建请求并执行
+                    uploadAsyncForResponse(client, request.newBuilder().url(location).build(), onError, onSuccess)
+                } else {
+                    // 如果请求成功
+                    if (response.isSuccessful) {
+                        onSuccess?.invoke(response)
+                    } else {
+                        onError?.invoke(IOException("Request failed with code ${response.code}"))
                     }
                 }
             }

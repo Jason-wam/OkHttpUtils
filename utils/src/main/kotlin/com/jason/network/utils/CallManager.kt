@@ -1,4 +1,4 @@
-package com.jason.network
+package com.jason.network.utils
 
 import okhttp3.Call
 import okhttp3.EventListener
