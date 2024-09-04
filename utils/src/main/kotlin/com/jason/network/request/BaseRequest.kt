@@ -18,6 +18,11 @@ open class BaseRequest<R> {
     internal var onResponse: ((Response) -> Unit)? = null
     internal open var client = OkHttpClientUtil.client.newBuilder().apply { CallManager.bind(this) }.build()
 
+    /**
+     * 用于设置请求参数的编码格式，解析返回数据时亦可用到
+     *
+     * 默认为 UTF-8
+     */
     var charset: Charset = Charsets.UTF_8
 
     open val request: Request
@@ -44,14 +49,25 @@ open class BaseRequest<R> {
         builder.url(urlBuilder.build())
     }
 
-    open fun param(key: String, value: String) {
-        urlBuilder.param(key, value)
+    open fun param(name: String, value: String) {
+        urlBuilder.param(name, value)
         builder.url(urlBuilder.build())
     }
 
-    fun setCharset(value: String) {
+    open fun param(name: String, value: Number) {
+        urlBuilder.param(name, value)
+        builder.url(urlBuilder.build())
+    }
+
+    open fun param(name: String, value: Boolean) {
+        urlBuilder.param(name, value)
+        builder.url(urlBuilder.build())
+    }
+
+    open fun setCharset(value: String) {
         charset = charset(value)
         urlBuilder.charset(value)
+        builder.url(urlBuilder.build())
     }
 
     fun headers(headers: Headers) {
@@ -73,6 +89,9 @@ open class BaseRequest<R> {
         client = client.newBuilder().apply(block).apply { CallManager.bind(this) }.build()
     }
 
+    /**
+     * 追加修改当前Request的Builder配置
+     */
     fun setBaseRequest(config: Request.Builder.() -> Unit) {
         builder.apply(config)
     }

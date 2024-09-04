@@ -14,9 +14,9 @@ import com.jason.network.extension.trustSSLCertificate
 import com.jason.network.extension.verifyMD5
 import com.jason.network.extension.verifySHA1
 import com.jason.network.extension.verifyShA256
-import com.jason.network.request.BoxedRequest
 import com.jason.network.request.DownloadRequest
 import com.jason.network.request.UploadRequest
+import com.jason.network.request.UrlRequest
 import com.jason.network.utils.CallManager
 import com.jason.network.utils.OkhttpLogger
 import okhttp3.*
@@ -30,6 +30,9 @@ import kotlin.reflect.KClass
 
 @Suppress("unused")
 object OkHttpClientUtil {
+    /**
+     * 默认的全局client，用于执行普通请求
+     */
     var client: OkHttpClient = OkHttpClient.Builder().apply {
         trustSSLCertificate()
         followRedirects(true)
@@ -46,6 +49,9 @@ object OkHttpClientUtil {
         CallManager.bind(this)
     }.build()
 
+    /**
+     * 长连接的全局client，用于下载文件等耗时较长的操作
+     */
     val longClient by lazy {
         client.newBuilder().apply {
             callTimeout(10, TimeUnit.DAYS)
@@ -55,6 +61,9 @@ object OkHttpClientUtil {
         }.build()
     }
 
+    /**
+     * 默认的转换器列表，用于解析响应
+     */
     val converters = ArrayList<ResponseConverter<*>>().apply {
         add(StringConverter())
         add(JSONObjectConverter())
@@ -62,6 +71,15 @@ object OkHttpClientUtil {
         add(NoConverter())
     }
 
+    /**
+     * 设置全局的client，用于执行特殊请求
+     *
+     * @param config OkHttpClient的配置块，用于设置client的参数，如超时时间、连接池等
+     *
+     * 此方法不会覆盖之前的client配置，而是将新的配置块合并到旧的配置中
+     *
+     * 每个请求都会基于此client实例
+     */
     fun setClient(config: (OkHttpClient.Builder.() -> Unit)? = null) {
         if (config != null) {
             client = client.newBuilder().apply(config).apply { CallManager.bind(this) }.build()
@@ -84,6 +102,11 @@ object OkHttpClientUtil {
         return builder.build()
     }
 
+    /**
+     * 添加自定义的转换器，用于解析响应
+     *
+     * 如果存在相同转换类型 [ResponseConverter.supportType] 的转换器，则替换已有的转换器
+     */
     fun addConverter(converter: ResponseConverter<*>) {
         // 移除相同类型的转换器
         converters.removeAll { it.supportType() == converter.supportType() }
@@ -106,8 +129,8 @@ object OkHttpClientUtil {
      * @throws Exception 如果请求执行过程中发生异常，则抛出此异常
      */
     @Throws(Exception::class)
-    inline fun <reified R> execute(config: BoxedRequest<R>.() -> Unit): R {
-        return execute(BoxedRequest<R>().apply(config), R::class)
+    inline fun <reified R> execute(config: UrlRequest<R>.() -> Unit): R {
+        return execute(UrlRequest<R>().apply(config), R::class)
     }
 
     /**
@@ -119,7 +142,7 @@ object OkHttpClientUtil {
      */
     @Throws(Exception::class)
     @Suppress("UNCHECKED_CAST")
-    fun <R> execute(request: BoxedRequest<R>, type: KClass<*>): R {
+    fun <R> execute(request: UrlRequest<R>, type: KClass<*>): R {
         return when (request.cacheMode) {
             CacheMode.ONLY_CACHE -> {
                 OkHttpResponseCache.get(request.standAloneCacheKay, request.request, request.cacheValidDuration)?.let {
@@ -129,7 +152,7 @@ object OkHttpClientUtil {
                         throw Exception("Converter not found for $type")
                     }
                     converter.convert(request, it)
-                } ?: throw IOException("No cache found!")
+                } ?: throw IOException("Cache not found!")
             }
 
             CacheMode.ONLY_NETWORK -> {
@@ -154,7 +177,7 @@ object OkHttpClientUtil {
                     )
                 } catch (e: Exception) {
                     OkHttpResponseCache.get(request.standAloneCacheKay, request.request, request.cacheValidDuration)
-                        ?: throw IOException("Request failed: ${e.message}, and no cache found!")
+                        ?: throw IOException("Request failed: ${e.message}, and cache not found!")
                 }
                 response.use {
                     request.onResponse?.invoke(it)
@@ -198,7 +221,8 @@ object OkHttpClientUtil {
             // 如果响应指示需要重定向
             if (response.isRedirect) {
                 // 获取重定向的位置信息，如果不存在则抛出异常
-                val location = response.header("Location") ?: throw IOException("No location found")
+                val location =
+                    response.header("Location") ?: throw IOException("Response is redirected but location not found!")
                 // 使用新的URL重新构建请求并执行
                 return executeResponse(client, cacheKey, request.newBuilder().url(location).build(), cacheValidDuration)
             }
@@ -221,7 +245,7 @@ object OkHttpClientUtil {
      *
      * @param request BoxedRequest对象，包含了所有执行请求所需的信息
      */
-    inline fun <reified R> enqueue(request: BoxedRequest<R>) {
+    inline fun <reified R> enqueue(request: UrlRequest<R>) {
         enqueue<R>(request, R::class)
     }
 
@@ -238,13 +262,13 @@ object OkHttpClientUtil {
      * 这种设计允许调用者以更加直观和便捷的方式配置和添加请求，避免了繁琐的构造器或者多个参数的方法调用
      *
      */
-    inline fun <reified R> enqueue(config: BoxedRequest<R>.() -> Unit) {
-        val request = BoxedRequest<R>().apply(config)
+    inline fun <reified R> enqueue(config: UrlRequest<R>.() -> Unit) {
+        val request = UrlRequest<R>().apply(config)
         enqueue<R>(request, R::class)
     }
 
     @Suppress("UNCHECKED_CAST")
-    fun <R> enqueue(request: BoxedRequest<R>, type: KClass<*>) {
+    fun <R> enqueue(request: UrlRequest<R>, type: KClass<*>) {
         thread {
             when (request.cacheMode) {
                 CacheMode.ONLY_CACHE -> {
@@ -310,7 +334,7 @@ object OkHttpClientUtil {
                             } ?: let {
                                 request.onError?.invoke(IOException(buildString {
                                     append(e.message)
-                                    append(" and no cache found!")
+                                    append(" and cache not found!")
                                 }))
                             }
                         },
@@ -378,50 +402,49 @@ object OkHttpClientUtil {
     ) {
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                if (!call.isCanceled()) {
-                    onError?.invoke(e)
-                }
+                onError?.invoke(e)
             }
 
             override fun onResponse(call: Call, response: Response) {
-                if (!call.isCanceled()) {
-                    if (response.isRedirect) {
-                        val location = response.header("Location")
-                        if (location?.isNotEmpty() != true) {
-                            onError?.invoke(IOException("Response is redirect but location not found!"))
-                        } else {
-                            enqueueResponse(
-                                client,
-                                cacheKey,
-                                request.newBuilder().url(location).build(),
-                                cacheValidDuration,
-                                onError,
-                                onSuccess
-                            )
-                        }
+                if (!response.isRedirect) {
+                    if (response.isSuccessful) {
+                        onSuccess?.invoke(OkHttpResponseCache.put(cacheKey, request, response, cacheValidDuration))
                     } else {
-                        if (response.isSuccessful) {
-                            onSuccess?.invoke(OkHttpResponseCache.put(cacheKey, request, response, cacheValidDuration))
-                        } else {
-                            onError?.invoke(IOException("Request failed with code ${response.code}"))
-                        }
+                        onError?.invoke(IOException("Request failed with code ${response.code}"))
+                    }
+                } else {
+                    val location = response.header("Location")
+                    if (location.isNullOrEmpty()) {
+                        onError?.invoke(IOException("Response is redirected but location not found!"))
+                    } else {
+                        enqueueResponse(
+                            client,
+                            cacheKey,
+                            request.newBuilder().url(location).build(),
+                            cacheValidDuration,
+                            onError,
+                            onSuccess
+                        )
                     }
                 }
             }
         })
     }
 
+    /**
+     * 同步下载文件
+     */
     @Throws(Exception::class)
     fun download(config: DownloadRequest.() -> Unit): File {
         val request = DownloadRequest().apply(config)
-        if (request.saveDirectory == null) throw IOException("SaveDirectory is null!")
+        if (request.downloadDir == null) throw IOException("Download dir is null!")
         return download(
             request.client,
             request.request,
-            request.saveDirectory!!,
-            request.filename,
+            request.downloadDir!!,
+            request.downloadFileName,
             request.overwrite,
-            request.rangeDownload,
+            request.enableResumeDownload,
             request.md5,
             request.sha1,
             request.sha256,
@@ -432,16 +455,19 @@ object OkHttpClientUtil {
         }
     }
 
+    /**
+     * 同步下载文件
+     */
     @Throws(Exception::class)
     fun download(request: DownloadRequest): File {
-        if (request.saveDirectory == null) throw IOException("SaveDirectory is null!")
+        if (request.downloadDir == null) throw IOException("Download dir is null!")
         return download(
             request.client,
             request.request,
-            request.saveDirectory!!,
-            request.filename,
+            request.downloadDir!!,
+            request.downloadFileName,
             request.overwrite,
-            request.rangeDownload,
+            request.enableResumeDownload,
             request.md5,
             request.sha1,
             request.sha256,
@@ -459,7 +485,7 @@ object OkHttpClientUtil {
         directory: File,
         filename: String? = null,
         overwrite: Boolean = false,
-        rangeDownload: Boolean,
+        enableResumeDownload: Boolean,
         md5: String = "",
         sha1: String = "",
         sha256: String = "",
@@ -467,7 +493,7 @@ object OkHttpClientUtil {
         onProgress: ((percent: Float, downloadBytes: Long, totalBytes: Long) -> Unit)? = null
     ): File {
         var newRequest = request
-        if (rangeDownload && filename != null) {
+        if (enableResumeDownload && filename != null) {
             val file = File(directory, filename)
             val configFile = File(directory, "$filename.cfg")
             if (overwrite && file.exists()) {
@@ -495,7 +521,7 @@ object OkHttpClientUtil {
             }
 
             if (sha256.isNotEmpty()) {
-                if (file.verifyShA256(sha256, onVerifyFile)) {
+                if (!file.verifyShA256(sha256, onVerifyFile)) {
                     throw FileVerificationException("File SHA-256 verification failed!")
                 }
             }
@@ -505,135 +531,137 @@ object OkHttpClientUtil {
         client.newCall(newRequest).execute().use { response ->
             if (response.isRedirect) {
                 val location = response.header("Location")
-                if (location?.isNotEmpty() != true) {
-                    throw IOException("Redirect url is empty!")
-                } else {
-                    println("redirect to $location")
-                    return download(
-                        client,
-                        newRequest.newBuilder().url(location).build(),
-                        directory,
-                        filename,
-                        overwrite,
-                        rangeDownload,
-                        md5,
-                        sha1,
-                        sha256,
-                        onVerifyFile,
-                        onProgress
-                    )
+                if (location.isNullOrEmpty()) {
+                    throw IOException("Response is redirected but location not found!")
                 }
-            } else {
-                if (!response.isSuccessful && response.code != 416) {
-                    throw IOException("Response is not successful: ${response.code}")
-                } else {
-                    val file = File(directory, filename ?: response.fileName())
-                    val contentLength = response.body?.contentLength() ?: -1L
-                    val configFile = File(directory, "$${file.name}.cfg")
-                    when (response.code) {
-                        416 -> { //416一般为请求的文件大小范围超出服务器文件大小范围
-                            if (file.exists() && file.length() > 0L) {
-                                verifyFile(file)
-                                configFile.delete()
-                                return file
-                            } else {
-                                throw IOException("Request content range error, code : ${response.code}")
-                            }
+
+                return download(
+                    client,
+                    newRequest.newBuilder().url(location).build(),
+                    directory,
+                    filename,
+                    overwrite,
+                    enableResumeDownload,
+                    md5,
+                    sha1,
+                    sha256,
+                    onVerifyFile,
+                    onProgress
+                )
+            }
+
+            if (!response.isSuccessful && response.code != 416) {
+                throw IOException("Response is not successful: ${response.code}")
+            }
+
+            val file = File(directory, filename ?: response.fileName())
+            val contentLength = response.body?.contentLength() ?: -1L
+            val configFile = File(directory, "$${file.name}.cfg")
+            when (response.code) {
+                416 -> { //416一般为请求的文件大小范围超出服务器文件大小范围
+                    if (file.exists() && file.length() > 0L) {
+                        verifyFile(file)
+                        configFile.delete()
+                        return file
+                    } else {
+                        throw IOException("Request content range error, code : ${response.code}")
+                    }
+                }
+
+                206 -> {
+                    //Content-Range: bytes 18333696-6114656255/6114656256
+                    val rangeInfo = response.headers["Content-Range"]
+                    if (rangeInfo == null) {
+                        throw IOException("Content-Range is null!")
+                    }
+
+                    val range = rangeInfo.substringAfter("bytes").substringBefore("/")
+                    val startPos = range.substringBefore("-").trim().toLong()
+
+                    //如果文件已存在，则读取配置文件中的TotalBytes
+                    var fullBytes = -1L
+                    val localFileBytes = file.length()
+                    if (configFile.exists()) {
+                        fullBytes = configFile.reader().use {
+                            it.readText().substringAfter("ContentLength=").toLong()
                         }
+                    }
 
-                        206 -> {
-                            //Content-Range: bytes 18333696-6114656255/6114656256
-                            val rangeInfo = response.headers["Content-Range"]
-                            if (rangeInfo == null) {
-                                throw IOException("Content-Range is null!")
-                            } else {
-                                val range = rangeInfo.substringAfter("bytes").substringBefore("/")
-                                val startPos = range.substringBefore("-").trim().toLong()
-
-                                println("断点续传: startPos = $startPos")
-
-                                //如果文件已存在，则读取配置文件中的TotalBytes
-                                var fullBytes = -1L
-                                val localFileBytes = file.length()
-                                if (configFile.exists()) {
-                                    fullBytes = configFile.reader().use {
-                                        it.readText().substringAfter("ContentLength=").toLong()
-                                    }
-                                }
-
-                                response.body?.source()?.inputStream()?.use { input ->
-                                    RandomAccessFile(file, "rwd").use {
-                                        it.seek(startPos)
-                                        input.copyTo(contentLength, it) { percent, bytesCopied, totalBytes ->
-                                            if (fullBytes == -1L) {
-                                                onProgress?.invoke(percent, bytesCopied, totalBytes)
-                                            } else {
-                                                val newBytesCopied = localFileBytes + bytesCopied
-                                                val newPercent = newBytesCopied / fullBytes.toFloat() * 100
-                                                onProgress?.invoke(newPercent, newBytesCopied, fullBytes)
-                                            }
-                                        }
-                                    }
-                                } ?: let {
-                                    throw IOException("Response body is null!")
-                                }
-                            }
-
-                            verifyFile(file)
-                            configFile.delete()
-                            return file
-                        }
-
-                        else -> {
-                            if (overwrite && file.exists()) {
-                                file.delete()
-                                configFile.delete()
-                            }
-
-                            if (file.exists() && file.length() == contentLength) {
-                                verifyFile(file)
-                                configFile.delete()
-                                return file
-                            } else {
-                                configFile.outputStream().writer().use {
-                                    it.write("ContentLength=$contentLength")
-                                }
-                                response.body?.source()?.inputStream()?.use { input ->
-                                    file.createNewFile()
-                                    file.outputStream().use { out ->
-                                        if (onProgress == null) {
-                                            input.copyTo(out)
-                                        } else {
-                                            input.copyTo(contentLength, out, onProgress)
-                                        }
-                                    }
-
-                                    verifyFile(file)
-                                    configFile.delete()
-                                    return file
-                                } ?: let {
-                                    configFile.delete()
-                                    throw IOException("Response body is null!")
+                    response.body?.source()?.inputStream()?.use { input ->
+                        RandomAccessFile(file, "rwd").use {
+                            println("断点续传: startPos = $startPos")
+                            it.seek(startPos)
+                            input.copyTo(contentLength, it) { percent, bytesCopied, totalBytes ->
+                                if (fullBytes == -1L) {
+                                    onProgress?.invoke(percent, bytesCopied, totalBytes)
+                                } else {
+                                    val newBytesCopied = localFileBytes + bytesCopied
+                                    val newPercent = newBytesCopied / fullBytes.toFloat() * 100
+                                    onProgress?.invoke(newPercent, newBytesCopied, fullBytes)
                                 }
                             }
                         }
+                    } ?: let {
+                        throw IOException("Response body is null!")
+                    }
+
+                    verifyFile(file)
+                    configFile.delete()
+                    return file
+                }
+
+                else -> {
+                    if (overwrite && file.exists()) {
+                        file.delete()
+                        configFile.delete()
+                    }
+
+                    if (file.exists() && file.length() == contentLength) {
+                        verifyFile(file)
+                        configFile.delete()
+                        return file
+                    }
+
+                    configFile.outputStream().writer().use {
+                        it.write("ContentLength=$contentLength")
+                    }
+
+                    response.body?.source()?.inputStream()?.use { input ->
+                        file.createNewFile()
+                        file.outputStream().use { out ->
+                            if (onProgress == null) {
+                                input.copyTo(out)
+                            } else {
+                                input.copyTo(contentLength, out, onProgress)
+                            }
+                        }
+
+                        verifyFile(file)
+                        configFile.delete()
+                        return file
+                    } ?: let {
+                        configFile.delete()
+                        throw IOException("Response body is null!")
                     }
                 }
             }
         }
     }
 
+    /**
+     * 异步下载文件
+     */
     fun downloadAsync(request: DownloadRequest) {
-        if (request.saveDirectory == null) {
-            request.onError?.invoke(IOException("SaveDirectory is null!"))
+        if (request.downloadDir == null) {
+            request.onError?.invoke(IOException("Download dir is null!"))
         } else {
             downloadAsync(
                 request.client,
                 request.request,
-                request.saveDirectory!!,
-                request.filename,
+                request.downloadDir!!,
+                request.downloadFileName,
                 request.overwrite,
-                request.rangeDownload,
+                request.enableResumeDownload,
                 request.md5,
                 request.sha1,
                 request.sha256,
@@ -645,18 +673,21 @@ object OkHttpClientUtil {
         }
     }
 
+    /**
+     * 异步下载文件
+     */
     fun downloadAsync(config: DownloadRequest.() -> Unit) {
         val request = DownloadRequest().apply(config)
-        if (request.saveDirectory == null) {
-            request.onError?.invoke(IOException("SaveDirectory is null!"))
+        if (request.downloadDir == null) {
+            request.onError?.invoke(IOException("Download dir is null!"))
         } else {
             downloadAsync(
                 request.client,
                 request.request,
-                request.saveDirectory!!,
-                request.filename,
+                request.downloadDir!!,
+                request.downloadFileName,
                 request.overwrite,
-                request.rangeDownload,
+                request.enableResumeDownload,
                 request.md5,
                 request.sha1,
                 request.sha256,
@@ -674,7 +705,7 @@ object OkHttpClientUtil {
         directory: File,
         filename: String? = null,
         overwrite: Boolean = false,
-        rangeDownload: Boolean = false,
+        enableResumeDownload: Boolean = false,
         md5: String = "",
         sha1: String = "",
         sha256: String = "",
@@ -684,7 +715,7 @@ object OkHttpClientUtil {
         onSuccess: ((file: File) -> Unit)? = null
     ) {
         var newRequest = request
-        if (rangeDownload && filename != null) {
+        if (enableResumeDownload && filename != null) {
             val file = File(directory, filename)
             val configFile = File(directory, "$filename.cfg")
             if (overwrite && file.exists()) {
@@ -728,131 +759,128 @@ object OkHttpClientUtil {
 
         client.newCall(newRequest).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                if (!call.isCanceled()) {
-                    onError?.invoke(e)
-                }
+                onError?.invoke(e)
             }
 
             override fun onResponse(call: Call, response: Response) {
-                if (!call.isCanceled()) {
-                    if (response.isRedirect) {
-                        val location = response.header("Location")
-                        if (location?.isNotBlank() == true) {
-                            println("redirect to $location")
-                            downloadAsync(
-                                client,
-                                newRequest.newBuilder().url(location).build(),
-                                directory,
-                                filename,
-                                overwrite,
-                                rangeDownload,
-                                md5,
-                                sha1,
-                                sha256,
-                                onVerifyFile,
-                                onError,
-                                onProgress,
-                                onSuccess
-                            )
-                        }
+                if (response.isRedirect) {
+                    val location = response.header("Location")
+                    if (location.isNullOrEmpty()) {
+                        onError?.invoke(IOException("Response is redirected but location not found!"))
                     } else {
-                        if (!response.isSuccessful && response.code != 416) {
-                            onError?.invoke(IOException("Response is not successful: ${response.code}"))
-                        } else {
-                            try {
-                                val file = File(directory, filename ?: response.fileName())
-                                val configFile = File(directory, "${file.name}.cfg")
-                                val contentLength = response.body?.contentLength() ?: -1L
-                                when (response.code) {
-                                    416 -> {//416一般为请求的文件大小范围超出服务器文件大小范围
-                                        if (file.exists() && file.length() > 0L) {
-                                            verifyFile(file)
-                                            configFile.delete()
-                                        } else {
-                                            onError?.invoke(IOException("Request content range error, code : ${response.code}"))
-                                        }
+                        downloadAsync(
+                            client,
+                            newRequest.newBuilder().url(location).build(),
+                            directory,
+                            filename,
+                            overwrite,
+                            enableResumeDownload,
+                            md5,
+                            sha1,
+                            sha256,
+                            onVerifyFile,
+                            onError,
+                            onProgress,
+                            onSuccess
+                        )
+                    }
+                } else {
+                    if (!response.isSuccessful && response.code != 416) {
+                        onError?.invoke(IOException("Response is not successful: ${response.code}"))
+                    } else {
+                        try {
+                            val file = File(directory, filename ?: response.fileName())
+                            val configFile = File(directory, "${file.name}.cfg")
+                            val contentLength = response.body?.contentLength() ?: -1L
+                            when (response.code) {
+                                416 -> {//416一般为请求的文件大小范围超出服务器文件大小范围
+                                    if (file.exists() && file.length() > 0L) {
+                                        verifyFile(file)
+                                        configFile.delete()
+                                    } else {
+                                        onError?.invoke(IOException("Request content range error, code : ${response.code}"))
                                     }
+                                }
 
-                                    206 -> {
-                                        //Content-Range: bytes 18333696-6114656255/6114656256
-                                        val rangeInfo = response.headers["Content-Range"]
-                                        if (rangeInfo == null) {
-                                            onError?.invoke(IOException("Content-Range is null!"))
-                                        } else {
-                                            val range = rangeInfo.substringAfter("bytes").substringBefore("/")
-                                            val startPos = range.substringBefore("-").trim().toLong()
+                                206 -> {
+                                    //Content-Range: bytes 18333696-6114656255/6114656256
+                                    val rangeInfo = response.headers["Content-Range"]
+                                    if (rangeInfo == null) {
+                                        onError?.invoke(IOException("Content-Range is null!"))
+                                    } else {
+                                        val range = rangeInfo.substringAfter("bytes").substringBefore("/")
+                                        val startPos = range.substringBefore("-").trim().toLong()
 
-                                            println("断点续传: startPos = $startPos")
+                                        println("断点续传: startPos = $startPos")
 
-                                            //如果文件已存在，则读取配置文件中的TotalBytes
-                                            var fullBytes = -1L
-                                            val localFileBytes = file.length()
-                                            if (configFile.exists()) {
-                                                try {
-                                                    fullBytes = configFile.reader().use {
-                                                        it.readText().substringAfter("ContentLength=").toLong()
-                                                    }
-                                                } catch (e: Exception) {
-                                                    e.printStackTrace()
+                                        //如果文件已存在，则读取配置文件中的TotalBytes
+                                        var fullBytes = -1L
+                                        val localFileBytes = file.length()
+                                        if (configFile.exists()) {
+                                            try {
+                                                fullBytes = configFile.reader().use {
+                                                    it.readText().substringAfter("ContentLength=").toLong()
                                                 }
-                                            }
-
-                                            response.body?.source()?.inputStream()?.use { input ->
-                                                RandomAccessFile(file, "rwd").use {
-                                                    it.seek(startPos)
-                                                    input.copyTo(
-                                                        contentLength, it
-                                                    ) { percent, bytesCopied, totalBytes ->
-                                                        if (fullBytes == -1L) {
-                                                            onProgress?.invoke(percent, bytesCopied, totalBytes)
-                                                        } else {
-                                                            val newBytesCopied = localFileBytes + bytesCopied
-                                                            val newPercent = newBytesCopied / fullBytes.toFloat() * 100
-                                                            onProgress?.invoke(newPercent, newBytesCopied, fullBytes)
-                                                        }
-                                                    }
-                                                }
-                                                configFile.delete()
-
-                                                verifyFile(file)
-                                            } ?: let {
-                                                onError?.invoke(IOException("Response body is null!"))
+                                            } catch (e: Exception) {
+                                                e.printStackTrace()
                                             }
                                         }
-                                    }
 
-                                    else -> {
-                                        if (overwrite && file.exists()) {
-                                            file.delete()
-                                            configFile.delete()
-                                        }
-                                        if (file.exists() && file.length() == contentLength) {
-                                            verifyFile(file)
-                                        } else {
-                                            configFile.outputStream().writer().use {
-                                                it.write("ContentLength=$contentLength")
-                                            }
-                                            response.body?.source()?.inputStream()?.use { input ->
-                                                file.createNewFile()
-                                                file.outputStream().use { out ->
-                                                    if (onProgress == null) {
-                                                        input.copyTo(out)
+                                        response.body?.source()?.inputStream()?.use { input ->
+                                            RandomAccessFile(file, "rwd").use {
+                                                it.seek(startPos)
+                                                input.copyTo(
+                                                    contentLength, it
+                                                ) { percent, bytesCopied, totalBytes ->
+                                                    if (fullBytes == -1L) {
+                                                        onProgress?.invoke(percent, bytesCopied, totalBytes)
                                                     } else {
-                                                        input.copyTo(contentLength, out, onProgress)
+                                                        val newBytesCopied = localFileBytes + bytesCopied
+                                                        val newPercent = newBytesCopied / fullBytes.toFloat() * 100
+                                                        onProgress?.invoke(newPercent, newBytesCopied, fullBytes)
                                                     }
                                                 }
-                                                configFile.delete()
-
-                                                verifyFile(file)
-                                            } ?: let {
-                                                onError?.invoke(IOException("Response body is null!"))
                                             }
+                                            configFile.delete()
+
+                                            verifyFile(file)
+                                        } ?: let {
+                                            onError?.invoke(IOException("Response body is null!"))
                                         }
                                     }
                                 }
-                            } catch (e: Exception) {
-                                onError?.invoke(e)
+
+                                else -> {
+                                    if (overwrite && file.exists()) {
+                                        file.delete()
+                                        configFile.delete()
+                                    }
+                                    if (file.exists() && file.length() == contentLength) {
+                                        verifyFile(file)
+                                    } else {
+                                        configFile.outputStream().writer().use {
+                                            it.write("ContentLength=$contentLength")
+                                        }
+                                        response.body?.source()?.inputStream()?.use { input ->
+                                            file.createNewFile()
+                                            file.outputStream().use { out ->
+                                                if (onProgress == null) {
+                                                    input.copyTo(out)
+                                                } else {
+                                                    input.copyTo(contentLength, out, onProgress)
+                                                }
+                                            }
+                                            configFile.delete()
+
+                                            verifyFile(file)
+                                        } ?: let {
+                                            onError?.invoke(IOException("Response body is null!"))
+                                        }
+                                    }
+                                }
                             }
+                        } catch (e: Exception) {
+                            onError?.invoke(e)
                         }
                     }
                 }
@@ -860,11 +888,17 @@ object OkHttpClientUtil {
         })
     }
 
+    /**
+     * 同步上传文件
+     */
     @Throws(Exception::class)
     inline fun <reified R> upload(config: UploadRequest<R>.() -> Unit): R {
         return upload(UploadRequest<R>().apply(config), R::class)
     }
 
+    /**
+     * 同步上传文件
+     */
     @Throws(Exception::class)
     @Suppress("UNCHECKED_CAST")
     fun <R> upload(request: UploadRequest<R>, type: KClass<*>): R {
@@ -905,10 +939,16 @@ object OkHttpClientUtil {
         }
     }
 
+    /**
+     * 异步上传文件
+     */
     inline fun <reified R> uploadAsync(request: UploadRequest<R>.() -> Unit) {
         uploadAsync(UploadRequest<R>().apply(request), R::class)
     }
 
+    /**
+     * 异步上传文件
+     */
     inline fun <reified R> uploadAsync(request: UploadRequest<R>) {
         uploadAsync(request, R::class)
     }
@@ -942,12 +982,10 @@ object OkHttpClientUtil {
 
             override fun onResponse(call: Call, response: Response) {
                 if (response.isRedirect) {
-                    // 获取重定向的位置信息，如果不存在则抛出异常
                     val location = response.header("Location") ?: throw IOException("No location found")
-                    // 使用新的URL重新构建请求并执行
                     uploadAsyncForResponse(client, request.newBuilder().url(location).build(), onError, onSuccess)
+                    return
                 } else {
-                    // 如果请求成功
                     if (response.isSuccessful) {
                         onSuccess?.invoke(response)
                     } else {

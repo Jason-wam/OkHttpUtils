@@ -1,6 +1,5 @@
 package com.jason.network.extension
 
-import com.jason.network.utils.MediaConst
 import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody

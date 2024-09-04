@@ -5,26 +5,33 @@ import java.io.File
 
 @Suppress("unused")
 class DownloadRequest : BaseRequest<File>() {
-    internal var filename: String? = null
-    internal var saveDirectory: File? = null
+    internal var downloadDir: File? = null
+    internal var downloadFileName: String? = null
     internal var overwrite: Boolean = false
 
     internal var onProgress: ((percent: Float, downloadBytes: Long, totalBytes: Long) -> Unit)? = null
-    internal var rangeDownload: Boolean = false
+    internal var enableResumeDownload: Boolean = false
     internal var md5: String = ""
     internal var sha1: String = ""
     internal var sha256: String = ""
     internal var onVerifyFile: ((percent: Float, downloadBytes: Long, totalBytes: Long) -> Unit)? = null
+
+    /**
+     * 下载大文件时使用长连接覆盖原始的短连接
+     */
     override var client = OkHttpClientUtil.longClient
 
-    fun setFileName(filename: String) {
-        this.filename = filename
+    fun setDownloadDir(dir: File) {
+        this.downloadDir = dir
     }
 
-    fun setSaveDirectory(directory: File) {
-        this.saveDirectory = directory
+    fun setDownloadFileName(filename: String) {
+        this.downloadFileName = filename
     }
 
+    /**
+     * 设置是否覆盖已存在的文件
+     */
     fun setOverwrite(overwrite: Boolean) {
         this.overwrite = overwrite
     }
@@ -33,8 +40,8 @@ class DownloadRequest : BaseRequest<File>() {
      * 开启断点续传, 默认不开启且必须指定文件名方可生效
      * 优先级低于 [overwrite],如果设置了 [overwrite] 为 true,则不会生效
      */
-    fun enableRangeDownload(enableRangeDownload: Boolean) {
-        this.rangeDownload = enableRangeDownload
+    fun setEnableResumeDownload(enableResumeDownload: Boolean) {
+        this.enableResumeDownload = enableResumeDownload
     }
 
     /**

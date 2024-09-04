@@ -38,7 +38,21 @@ class UploadRequest<R> : BaseRequest<R>() {
      * 表单请求体
      * 当你设置`partBody`后当前表单请求体中的所有参数都会被存放到partBody中
      */
-    internal var formBody = FormBody.Builder()
+    internal var formBody = FormBody.Builder(charset)
+
+    override fun setCharset(value: String) {
+        super.setCharset(value)
+        val form = formBody.build()
+        formBody = if (form.size == 0) {
+            FormBody.Builder(charset)
+        } else {
+            FormBody.Builder(charset).apply {
+                for (i in 0 until form.size) {
+                    param(form.name(i), form.value(i))
+                }
+            }
+        }
+    }
 
     /**
      * multipart请求体的媒体类型
@@ -94,16 +108,14 @@ class UploadRequest<R> : BaseRequest<R>() {
     /**
      * 添加到 FormBody
      */
-    fun param(name: String, value: Number?) {
-        value ?: return
+    override fun param(name: String, value: Number) {
         formBody.add(name, value.toString())
     }
 
     /**
      * 添加到 FormBody
      */
-    fun param(name: String, value: Boolean?) {
-        value ?: return
+    override fun param(name: String, value: Boolean) {
         formBody.add(name, value.toString())
     }
 

@@ -11,7 +11,7 @@ import java.io.File
 fun main() {
     OkHttpClientUtil.setCacheDir(File("D:/OKHttpCache"))
 
-    post()
+    download()
 }
 
 fun enqueue() {
@@ -58,12 +58,12 @@ fun post() {
 
 fun download() {
     //异步请求
-    OkHttpClientUtil.downloadAsync {
+    OkHttpClientUtil.download {
         //shasum -a 256 = 8762f7e74e4d64d72fceb5f70682e6b069932deedb4949c6975d0f0fe0a91be3
         url("https://releases.ubuntu.com/24.04/ubuntu-24.04.1-desktop-amd64.iso")
-        setSaveDirectory(File("D:/"))
-        setFileName("ubuntu-24.04.1-desktop-amd64.iso")
-        enableRangeDownload(true)
+        setDownloadDir(File("D:/"))
+        setDownloadFileName("ubuntu-24.04.1-desktop-amd64.iso")
+        setEnableResumeDownload(true)
         setSHA256("c2e6f4dc37ac944e2ed507f87c6188dd4d3179bf4a3f9e110d3c88d1f3294bdc")
 
         onVerifyFile { percent, totalCopied, totalSize ->
@@ -82,7 +82,7 @@ fun download() {
         }
 
         onProgress { percent, downloadBytes, totalBytes ->
-            print("\r下载进度： $percent , $downloadBytes/$totalBytes")
+            print("\r下载进度： ${String.format("%.2f", percent)} , $downloadBytes/$totalBytes")
         }
     }
 }

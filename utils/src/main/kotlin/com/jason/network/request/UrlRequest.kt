@@ -7,14 +7,14 @@ import com.jason.network.utils.UrlBuilder
 import okhttp3.RequestBody
 
 @Suppress("unused")
-class BoxedRequest<R> : BaseRequest<R>() {
+class UrlRequest<R> : BaseRequest<R>() {
     internal var cacheMode: CacheMode = CacheMode.ONLY_NETWORK
     internal var cacheValidDuration: Long = CacheValidDuration.FOREVER
     internal var converter: ResponseConverter<R>? = null
     internal var standAloneCacheKay: String? = null
     private val urlBuilder = UrlBuilder()
 
-    fun setCache(mode: CacheMode, duration: Long = CacheValidDuration.FOREVER): BoxedRequest<R> {
+    fun setCache(mode: CacheMode, duration: Long = CacheValidDuration.FOREVER): UrlRequest<R> {
         this.cacheMode = mode
         this.cacheValidDuration = duration
         return this
@@ -44,6 +44,10 @@ class BoxedRequest<R> : BaseRequest<R>() {
         builder.head()
     }
 
+    fun method(method: Method, body: RequestBody? = null) {
+        builder.method(method.name, body)
+    }
+
     fun setCacheMode(cacheMode: CacheMode) {
         this.cacheMode = cacheMode
     }
@@ -64,7 +68,7 @@ class BoxedRequest<R> : BaseRequest<R>() {
     }
 
     /**
-     * 设置缓存时长
+     * 设置缓存有效时长
      * @param duration 单位：毫秒
      */
     fun setCacheValidDuration(duration: Long) {

@@ -3,7 +3,6 @@ package com.jason.network.converter
 import com.jason.network.error.ConvertException
 import com.jason.network.extension.readString
 import com.jason.network.request.BaseRequest
-import com.jason.network.request.BoxedRequest
 import okhttp3.Response
 import org.json.JSONArray
 import kotlin.reflect.KClass

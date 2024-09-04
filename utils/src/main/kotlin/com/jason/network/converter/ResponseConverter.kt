@@ -1,7 +1,6 @@
 package com.jason.network.converter
 
 import com.jason.network.request.BaseRequest
-import com.jason.network.request.BoxedRequest
 import okhttp3.Response
 import kotlin.reflect.KClass
 

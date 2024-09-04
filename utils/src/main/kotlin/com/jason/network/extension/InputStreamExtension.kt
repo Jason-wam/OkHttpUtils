@@ -41,8 +41,10 @@ fun InputStream.copyTo(
     while (bytes >= 0) {
         outStream.write(buffer, 0, bytes)
         bytesCopied += bytes
-        val percent = if (totalBytes > 0) bytesCopied / totalBytes.toFloat() * 100 else 0f
-        progress?.invoke(percent, bytesCopied, totalBytes)
+        progress?.let {
+            val percent = if (totalBytes > 0) bytesCopied.toFloat() / totalBytes.toFloat() * 100 else 0f
+            it.invoke(percent, bytesCopied, totalBytes)
+        }
         bytes = read(buffer)
     }
     return bytesCopied
@@ -65,11 +67,25 @@ fun InputStream.copyTo(
     while (bytes >= 0) {
         file.write(buffer, 0, bytes)
         bytesCopied += bytes
-        val percent = if (totalBytes > 0) bytesCopied / totalBytes.toFloat() * 100 else 0f
-        progress?.invoke(percent, bytesCopied, totalBytes)
+        progress?.let {
+            val percent = if (totalBytes > 0) bytesCopied.toFloat() / totalBytes.toFloat() * 100 else 0f
+            it.invoke(percent, bytesCopied, totalBytes)
+        }
         bytes = read(buffer)
     }
     return bytesCopied
+}
+
+fun FileInputStream.md5(progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null): String {
+    return sum(MessageDigest.getInstance("MD5"), progress)
+}
+
+fun FileInputStream.sha1(progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null): String {
+    return sum(MessageDigest.getInstance("SHA-1"), progress)
+}
+
+fun FileInputStream.sha256(progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null): String {
+    return sum(MessageDigest.getInstance("SHA-256"), progress)
 }
 
 fun InputStream.md5(
@@ -107,11 +123,10 @@ fun InputStream.sum(
     while (read(buffer).also { bytesRead = it } != -1) {
         digest.update(buffer)
         totalBytesCopied += bytesRead
-
-        // 计算进度并调用回调
-        progress?.invoke(
-            totalBytesCopied.toFloat() / totalBytes * 100, totalBytesCopied, totalBytes
-        )
+        progress?.let {
+            val percent = if (totalBytes > 0) totalBytesCopied.toFloat() / totalBytes.toFloat() * 100 else 0f
+            it.invoke(percent, totalBytesCopied, totalBytes)
+        }
     }
 
     // 计算 MD5 值并转换为十六进制字符串
@@ -130,26 +145,13 @@ fun FileInputStream.sum(
     while (read(buffer).also { bytesRead = it } != -1) {
         digest.update(buffer)
         totalBytesCopied += bytesRead
-
-        // 计算进度并调用回调
-        progress?.invoke(
-            totalBytesCopied.toFloat() / totalBytes * 100, totalBytesCopied, totalBytes
-        )
+        progress?.let {
+            val percent = if (totalBytes > 0) totalBytesCopied.toFloat() / totalBytes.toFloat() * 100 else 0f
+            it.invoke(percent, totalBytesCopied, totalBytes)
+        }
     }
 
     // 计算 MD5 值并转换为十六进制字符串
     val checksum = BigInteger(1, digest.digest()).toString(16)
     return checksum.padStart(32, '0')
-}
-
-fun FileInputStream.md5(progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null): String {
-    return sum(MessageDigest.getInstance("MD5"), progress)
-}
-
-fun FileInputStream.sha1(progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null): String {
-    return sum(MessageDigest.getInstance("SHA-1"), progress)
-}
-
-fun FileInputStream.sha256(progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null): String {
-    return sum(MessageDigest.getInstance("SHA-256"), progress)
 }
