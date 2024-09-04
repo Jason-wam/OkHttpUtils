@@ -16,7 +16,7 @@ open class BaseRequest<R> {
     internal var onError: ((Exception) -> Unit)? = null
     internal var onSuccess: ((R) -> Unit)? = null
     internal var onResponse: ((Response) -> Unit)? = null
-    internal open var client = OkHttpClientUtil.client.newBuilder().apply { CallManager.bind(this) }.build()
+    internal open var client = OkHttpClientUtil.baseClient.newBuilder().apply { CallManager.bind(this) }.build()
 
     /**
      * 用于设置请求参数的编码格式，解析返回数据时亦可用到

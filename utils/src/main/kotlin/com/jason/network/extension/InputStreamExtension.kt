@@ -1,5 +1,7 @@
 package com.jason.network.extension
 
+import com.jason.network.error.CallCanceledException
+import okhttp3.Call
 import java.io.FileInputStream
 import java.io.InputStream
 import java.io.OutputStream
@@ -76,37 +78,50 @@ fun InputStream.copyTo(
     return bytesCopied
 }
 
-fun FileInputStream.md5(progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null): String {
-    return sum(MessageDigest.getInstance("MD5"), progress)
+fun FileInputStream.md5(
+    call: Call? = null, progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
+): String {
+    return sum(call, MessageDigest.getInstance("MD5"), progress)
 }
 
-fun FileInputStream.sha1(progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null): String {
-    return sum(MessageDigest.getInstance("SHA-1"), progress)
+fun FileInputStream.sha1(
+    call: Call? = null, progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
+): String {
+    return sum(call, MessageDigest.getInstance("SHA-1"), progress)
 }
 
-fun FileInputStream.sha256(progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null): String {
-    return sum(MessageDigest.getInstance("SHA-256"), progress)
+fun FileInputStream.sha256(
+    call: Call? = null, progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
+): String {
+    return sum(call, MessageDigest.getInstance("SHA-256"), progress)
 }
 
 fun InputStream.md5(
-    contentLength: Long = -1, progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
+    call: Call? = null,
+    contentLength: Long = -1,
+    progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
 ): String {
-    return sum(MessageDigest.getInstance("MD5"), contentLength, progress)
+    return sum(call, MessageDigest.getInstance("MD5"), contentLength, progress)
 }
 
 fun InputStream.sha1(
-    contentLength: Long = -1, progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
+    call: Call? = null,
+    contentLength: Long = -1,
+    progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
 ): String {
-    return sum(MessageDigest.getInstance("SHA-1"), contentLength, progress)
+    return sum(call, MessageDigest.getInstance("SHA-1"), contentLength, progress)
 }
 
 fun InputStream.sha256(
-    contentLength: Long = -1, progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
+    call: Call? = null,
+    contentLength: Long = -1,
+    progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
 ): String {
-    return sum(MessageDigest.getInstance("SHA-256"), contentLength, progress)
+    return sum(call, MessageDigest.getInstance("SHA-256"), contentLength, progress)
 }
 
 fun InputStream.sum(
+    call: Call?? = null,
     digest: MessageDigest,
     contentLength: Long = -1,
     progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
@@ -121,6 +136,9 @@ fun InputStream.sum(
     }
 
     while (read(buffer).also { bytesRead = it } != -1) {
+        if (call?.isCanceled() == true) {
+            throw CallCanceledException("Call canceled!")
+        }
         digest.update(buffer)
         totalBytesCopied += bytesRead
         progress?.let {
@@ -135,7 +153,9 @@ fun InputStream.sum(
 }
 
 fun FileInputStream.sum(
-    digest: MessageDigest, progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
+    call: Call? = null,
+    digest: MessageDigest,
+    progress: ((percent: Float, bytesCopied: Long, totalBytes: Long) -> Unit)? = null
 ): String {
     val buffer = ByteArray(4096)
     var bytesRead: Int
@@ -143,6 +163,9 @@ fun FileInputStream.sum(
     val totalBytes = channel.size() // 获取文件总字节数
 
     while (read(buffer).also { bytesRead = it } != -1) {
+        if (call?.isCanceled() == true) {
+            throw CallCanceledException("Call canceled!")
+        }
         digest.update(buffer)
         totalBytesCopied += bytesRead
         progress?.let {

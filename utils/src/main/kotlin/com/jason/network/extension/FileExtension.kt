@@ -1,5 +1,6 @@
 package com.jason.network.extension
 
+import okhttp3.Call
 import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody
@@ -9,25 +10,31 @@ import org.json.JSONObject
 import java.io.File
 
 fun File.verifyMD5(
-    md5: String, onVerifyFile: ((percent: Float, totalCopied: Long, totalSize: Long) -> Unit)? = null
+    call: Call? = null,
+    md5: String,
+    onVerifyFile: ((percent: Float, totalCopied: Long, totalSize: Long) -> Unit)? = null
 ): Boolean {
-    val result = inputStream().use { it.md5(onVerifyFile) }
+    val result = inputStream().use { it.md5(call, onVerifyFile) }
     println("MD5: $result")
     return result.lowercase() == md5.lowercase()
 }
 
 fun File.verifySHA1(
-    sha1: String, onVerifyFile: ((percent: Float, totalCopied: Long, totalSize: Long) -> Unit)? = null
+    call: Call? = null,
+    sha1: String,
+    onVerifyFile: ((percent: Float, totalCopied: Long, totalSize: Long) -> Unit)? = null
 ): Boolean {
-    val result = inputStream().use { it.sha1(onVerifyFile) }
+    val result = inputStream().use { it.sha1(call, onVerifyFile) }
     println("SHA1: $result")
     return result.lowercase() == sha1.lowercase()
 }
 
 fun File.verifyShA256(
-    sha256: String, onVerifyFile: ((percent: Float, totalCopied: Long, totalSize: Long) -> Unit)? = null
+    call: Call? = null,
+    sha256: String,
+    onVerifyFile: ((percent: Float, totalCopied: Long, totalSize: Long) -> Unit)? = null
 ): Boolean {
-    val result = inputStream().use { it.sha256(onVerifyFile) }
+    val result = inputStream().use { it.sha256(call, onVerifyFile) }
     println("SHA256: $result")
     return result.lowercase() == sha256.lowercase()
 }

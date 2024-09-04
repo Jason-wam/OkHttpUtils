@@ -7,9 +7,12 @@ import com.jason.network.extension.isFromCache
 import okhttp3.Response
 import org.json.JSONObject
 import java.io.File
+import kotlin.concurrent.thread
 
 fun main() {
     OkHttpClientUtil.setCacheDir(File("D:/OKHttpCache"))
+
+
 
     download()
 }
@@ -17,7 +20,7 @@ fun main() {
 fun enqueue() {
     OkHttpClientUtil.enqueue<Response> {
         url("https://i1.hdslb.com/bfs/banner/c5595aaa09c1710ba3e32651aab84104d6171b2b.png")
-        setCacheMode(CacheMode.NETWORK_ELSE_CACHE)
+        setCacheMode(CacheMode.CACHE_ELSE_NETWORK)
         setCacheValidDuration(CacheValidDuration.FOREVER)
         onResponse {
             println()
@@ -56,17 +59,34 @@ fun post() {
     }
 }
 
+fun cancelDownload() {
+    println("开始取消下载...")
+    thread {
+        Thread.sleep(5000)
+        OkHttpClientUtil.cancelByTag("download")
+        println("已取消下载...")
+    }
+}
+
 fun download() {
+//    cancelDownload()
     //异步请求
-    OkHttpClientUtil.download {
+    OkHttpClientUtil.downloadAsync() {
+        tag("download")
         //shasum -a 256 = 8762f7e74e4d64d72fceb5f70682e6b069932deedb4949c6975d0f0fe0a91be3
         url("https://releases.ubuntu.com/24.04/ubuntu-24.04.1-desktop-amd64.iso")
         setDownloadDir(File("D:/"))
         setDownloadFileName("ubuntu-24.04.1-desktop-amd64.iso")
         setEnableResumeDownload(true)
+//        setOverwrite(true)
         setSHA256("c2e6f4dc37ac944e2ed507f87c6188dd4d3179bf4a3f9e110d3c88d1f3294bdc")
 
+        var test = false
         onVerifyFile { percent, totalCopied, totalSize ->
+            if (test != true) {
+                test = true
+                cancelDownload()
+            }
             print("\r校验文件： $percent , $totalCopied/$totalSize")
         }
 
@@ -129,14 +149,13 @@ fun execute2() {
 fun enqueue2() {
     OkHttpClientUtil.enqueue<JSONObject> {
         url("https://api.bilibili.com/")
-        param("from", "Android")
         path("x/click-interface/click/now")
-        setCacheMode(CacheMode.ONLY_NETWORK)
+        param("from", "Android")
+        setCacheMode(CacheMode.CACHE_ELSE_NETWORK)
+        setCacheValidDuration(CacheValidDuration.FOREVER)
+
         onResponse {
             println("onResponse > 是否是缓存：${it.isFromCache} ${it.body?.contentType()}")
-
-            //此处不得使用it.body?.string()，因为此时消费了it.body会导致onSuccess失败
-            //println("onResponse > 是否是缓存：${it.isFromCache}, string = ${it.body?.source()?.peek()?.readString(Charsets.UTF_8)}")
         }
         onError {
             println("请求失败： ${it.stackTraceToString()}")

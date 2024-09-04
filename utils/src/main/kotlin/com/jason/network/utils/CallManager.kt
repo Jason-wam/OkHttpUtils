@@ -14,13 +14,18 @@ internal object CallManager {
     fun cancel(call: Call) {
         call.cancel()
         synchronized(calls) {
+            OkhttpLogger.i("OkHttpClient", "cancel call: ${call.request()}")
             calls.remove(call)
         }
     }
 
     fun cancelByTag(tag: Any) {
         synchronized(calls) {
-            calls.removeAll(calls.filter { it.request().tag() == tag })
+            val cancellations = calls.filter { it.request().tag() == tag }
+            calls.removeAll(cancellations.onEach {
+                it.cancel()
+                OkhttpLogger.i("OkHttpClient", "cancel call: ${it.request()}")
+            })
         }
     }
 
@@ -28,6 +33,7 @@ internal object CallManager {
         synchronized(calls) {
             calls.forEach { it.cancel() }
             calls.clear()
+            OkhttpLogger.i("OkHttpClient", "cancel all calls.")
         }
     }
 
