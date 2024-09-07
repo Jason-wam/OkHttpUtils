@@ -90,7 +90,8 @@ class UploadRequest<R> : BaseRequest<R>() {
      *
      * 添加到 FormBody
      */
-    override fun param(name: String, value: String) {
+    override fun param(name: String, value: String?) {
+        value ?: return
         formBody.add(name, value)
     }
 
@@ -108,14 +109,16 @@ class UploadRequest<R> : BaseRequest<R>() {
     /**
      * 添加到 FormBody
      */
-    override fun param(name: String, value: Number) {
+    override fun param(name: String, value: Number?) {
+        value ?: return
         formBody.add(name, value.toString())
     }
 
     /**
      * 添加到 FormBody
      */
-    override fun param(name: String, value: Boolean) {
+    override fun param(name: String, value: Boolean?) {
+        value ?: return
         formBody.add(name, value.toString())
     }
 

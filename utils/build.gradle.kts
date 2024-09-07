@@ -29,7 +29,7 @@ java {
     targetCompatibility = JavaVersion.VERSION_1_8
 }
 
-val libVersion = "1.0.9"
+val libVersion = "1.1.1"
 
 tasks.withType<Jar> {
     archiveBaseName.set("OkHttpUtils") // 设置构件的基本名称

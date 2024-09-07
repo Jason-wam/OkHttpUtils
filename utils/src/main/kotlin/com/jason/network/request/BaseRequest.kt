@@ -49,17 +49,20 @@ open class BaseRequest<R> {
         builder.url(urlBuilder.build())
     }
 
-    open fun param(name: String, value: String) {
+    open fun param(name: String, value: String?) {
+        value ?: return
         urlBuilder.param(name, value)
         builder.url(urlBuilder.build())
     }
 
-    open fun param(name: String, value: Number) {
+    open fun param(name: String, value: Number?) {
+        value ?: return
         urlBuilder.param(name, value)
         builder.url(urlBuilder.build())
     }
 
-    open fun param(name: String, value: Boolean) {
+    open fun param(name: String, value: Boolean?) {
+        value ?: return
         urlBuilder.param(name, value)
         builder.url(urlBuilder.build())
     }
@@ -74,11 +77,13 @@ open class BaseRequest<R> {
         builder.headers(headers)
     }
 
-    fun header(name: String, value: String) {
+    fun header(name: String, value: String?) {
+        value ?: return
         builder.header(name, value)
     }
 
-    fun addHeader(name: String, value: String) {
+    fun addHeader(name: String, value: String?) {
+        value ?: return
         builder.addHeader(name, value)
     }
 

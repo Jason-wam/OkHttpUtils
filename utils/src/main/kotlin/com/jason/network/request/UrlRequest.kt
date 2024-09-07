@@ -3,7 +3,8 @@ package com.jason.network.request
 import com.jason.network.cache.CacheMode
 import com.jason.network.cache.CacheValidDuration
 import com.jason.network.converter.ResponseConverter
-import com.jason.network.utils.UrlBuilder
+import okhttp3.FormBody
+import okhttp3.MultipartBody
 import okhttp3.RequestBody
 
 @Suppress("unused")
@@ -12,7 +13,6 @@ class UrlRequest<R> : BaseRequest<R>() {
     internal var cacheValidDuration: Long = CacheValidDuration.FOREVER
     internal var converter: ResponseConverter<R>? = null
     internal var standAloneCacheKay: String? = null
-    private val urlBuilder = UrlBuilder()
 
     fun setCache(mode: CacheMode, duration: Long = CacheValidDuration.FOREVER): UrlRequest<R> {
         this.cacheMode = mode
@@ -22,6 +22,20 @@ class UrlRequest<R> : BaseRequest<R>() {
 
     fun post(body: RequestBody) {
         builder.post(body)
+    }
+
+    /**
+     * 添加Form请求体
+     */
+    fun postForm(form: FormBody.Builder.() -> Unit) {
+        builder.post(FormBody.Builder(charset).apply(form).build())
+    }
+
+    /**
+     * 添加Multipart请求体
+     */
+    fun postParts(form: MultipartBody.Builder.() -> Unit) {
+        builder.post(MultipartBody.Builder().apply(form).build())
     }
 
     fun put(body: RequestBody) {
